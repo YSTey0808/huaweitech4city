@@ -16,20 +16,41 @@ WINDOW_SIZE = 10
 SAFE_LABEL = "safe"
 
 
-def fetch_message_window(supabase, conversation_id: str, window_size: int = WINDOW_SIZE) -> list:
-    res = (
+def fetch_message_window(supabase, conversation_id: str, window_size: int = WINDOW_SIZE,
+                          up_to_message_id: str = None) -> list:
+    """
+    Last `window_size` messages, chronological. up_to_message_id anchors the
+    window to END at that message instead of "now" -- the user-report path
+    needs this, otherwise a report on a message older than the last
+    `window_size` would fetch a window that doesn't even contain it.
+    Returns [] if the anchor message doesn't exist in this conversation.
+    """
+    query = (
         supabase.table("messages")
         .select("id, sender_id, content, reply_to, created_at")
         .eq("conversation_id", conversation_id)
-        .order("created_at", desc=True)
-        .limit(window_size)
-        .execute()
     )
+    if up_to_message_id is not None:
+        anchor_res = (
+            supabase.table("messages")
+            .select("created_at")
+            .eq("id", up_to_message_id)
+            .eq("conversation_id", conversation_id)  # anchor must belong to this conversation
+            .execute()
+        )
+        if not anchor_res.data:
+            return []
+        query = query.lte("created_at", anchor_res.data[0]["created_at"])
+
+    res = query.order("created_at", desc=True).limit(window_size).execute()
     rows = list(reversed(res.data))  # chronological order, oldest first (build_message_graph expects this)
     return [supabase_row_to_pipeline_message(row) for row in rows]
 
 
-def write_scores(supabase, conversation_id: str, result: dict) -> dict:
+def write_scores(supabase, conversation_id: str, result: dict, source: str = "model") -> dict:
+    """source: 'model' (automatic scoring) or 'user_report' (report-triggered
+    re-run) -- written onto every row for audit-trail provenance, see
+    migration 008."""
     label = result["conversation_label"]
     if label == SAFE_LABEL:
         # Nothing fired -> write nothing; existing rows are never deleted or downgraded.
@@ -55,6 +76,7 @@ def write_scores(supabase, conversation_id: str, result: dict) -> dict:
         "evidence_msg_ids": evidence_msg_ids,
         "severity": result.get("severity"),
         "reasoning": result.get("gentle_alert_text"),
+        "source": source,
     }
     if existing_res.data:
         supabase.table("conversation_scores").update(payload).eq("id", existing_res.data[0]["id"]).execute()
@@ -80,7 +102,7 @@ def write_scores(supabase, conversation_id: str, result: dict) -> dict:
         )
         have = {row["msg_id"] for row in have_res.data}
         rows = [
-            {"msg_id": e["message_id"], "label": label, "confidence": e["score"]}
+            {"msg_id": e["message_id"], "label": label, "confidence": e["score"], "source": source}
             for e in evidence
             if e["message_id"] not in have
         ]
