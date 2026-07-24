@@ -9,10 +9,13 @@ with three deliberate differences:
      older than the last WINDOW_SIZE would otherwise score a window that
      doesn't even contain it.
   2. The report ({message_id, reason}) is passed into the pipeline, which
-     forces the reported message into the LLM evidence bundle and frames
-     the report to the LLM as a human signal to weigh (and disables the
+     frames it to the LLM as a human signal to weigh (and disables the
      SKIP_LLM_BELOW cost short-circuit -- a report exists precisely to
-     challenge a low score). See pipeline/inference.py.
+     challenge a low score). The reported message needs no special
+     forced-inclusion handling: the LLM already sees every message in the
+     window, not a filtered subset (see pipeline/inference.py's
+     rank_messages), and the window is anchored on the reported message
+     per point 1 above, so it's guaranteed present regardless.
   3. Resulting rows are written with source='user_report' (vs 'model') so
      report-triggered findings stay distinguishable -- the audit trail.
 
@@ -37,12 +40,12 @@ def report_message_request(
     embedding_store,
     model_version: str,
 ) -> dict:
-    from inference import score_conversation  # pipeline/, on sys.path -- see app/main.py
-
     messages = fetch_message_window(supabase, conversation_id, up_to_message_id=msg_id)
     if not messages:
         # Unknown msg_id, or msg_id not in this conversation
         return {"conversation_scores": "message_not_found", "message_scores_inserted": 0}
+
+    from inference import score_conversation  # pipeline/, on sys.path -- see app/main.py
 
     messages = embedding_store.get_or_compute(messages, embed_model, model_version)
     result = score_conversation(

@@ -64,11 +64,20 @@ def write_scores(supabase, conversation_id: str, result: dict, source: str = "mo
     # a plain select + length check sidesteps it entirely.
     existing_res = (
         supabase.table("conversation_scores")
-        .select("id")
+        .select("id, source")
         .eq("conversation_id", conversation_id)
         .eq("label", label)
         .execute()
     )
+    # source is sticky one-directionally: once a row has been human-confirmed
+    # (user_report), a later automatic pass that independently agrees on the
+    # same label must not downgrade it back to 'model' -- that would silently
+    # erase the "a human caught this" audit trail the column exists for. Only
+    # 'model' -> 'user_report' is ever allowed, never the reverse.
+    effective_source = source
+    if existing_res.data and existing_res.data[0]["source"] == "user_report":
+        effective_source = "user_report"
+
     payload = {
         "conversation_id": conversation_id,
         "label": label,
@@ -76,7 +85,7 @@ def write_scores(supabase, conversation_id: str, result: dict, source: str = "mo
         "evidence_msg_ids": evidence_msg_ids,
         "severity": result.get("severity"),
         "reasoning": result.get("gentle_alert_text"),
-        "source": source,
+        "source": effective_source,
     }
     if existing_res.data:
         supabase.table("conversation_scores").update(payload).eq("id", existing_res.data[0]["id"]).execute()
@@ -121,11 +130,11 @@ def score_conversation_request(
     embedding_store,
     model_version: str,
 ) -> dict:
-    from inference import score_conversation  # pipeline/, on sys.path -- see app/main.py
-
     messages = fetch_message_window(supabase, conversation_id)
     if not messages:
         return {"conversation_scores": "no_messages", "message_scores_inserted": 0}
+
+    from inference import score_conversation  # pipeline/, on sys.path -- see app/main.py
 
     messages = embedding_store.get_or_compute(messages, embed_model, model_version)
     result = score_conversation(conversation_id, messages, model)
