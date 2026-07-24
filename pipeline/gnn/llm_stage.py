@@ -16,6 +16,12 @@ didn't happen to score highest. Sending the full window (already capped
 small -- see backend/'s WINDOW_SIZE) instead of a pre-filtered top-k keeps
 this affordable while giving the LLM enough to actually disagree with the
 classifier when the text doesn't support it.
+
+A human-feedback report (user_report, see build_prompt) rides on this same
+mechanism for free: since every message is already in view, a report never
+needs to force anything into visibility -- it only adds one conversation
+member's stated belief about a specific message as extra context for the
+LLM's own judgment.
 """
 
 import os
@@ -43,7 +49,7 @@ def _get_client() -> Anthropic:
     return _client
 
 
-def build_prompt(conversation_id, messages, conversation_score):
+def build_prompt(conversation_id, messages, conversation_score, user_report=None):
     """
     messages: every message in the scoring window (not a GNN-filtered
         subset), each a dict {message_id, text, sender_id, score}. score is
@@ -53,11 +59,33 @@ def build_prompt(conversation_id, messages, conversation_score):
     conversation_score: float in [0,1] -- P(harmful) for the conversation as
         a whole, from MessageGraphSAGE's pooled conversation-level head.
         Also a signal to weigh, not ground truth.
+    user_report: optional dict {message_id, reason} -- a human-feedback
+        report filed by a conversation member who believes message_id is
+        harmful despite the model not flagging it. Since every message is
+        already visible to the LLM (see module docstring), this needs no
+        forced-inclusion mechanism -- it's just extra context, framed as a
+        strong signal to weigh, not an automatic override. `reason` is free
+        user text embedded in the prompt -- same category of exposure as any
+        other message's text above, not a new one.
     """
     message_lines = [
         f'  - id={m["message_id"]}, sender={m["sender_id"]}, model_score={m["score"]:.2f}: "{m["text"]}"'
         for m in messages
     ]
+
+    report_section = ""
+    if user_report is not None:
+        report_section = f"""
+
+A member of this conversation has REPORTED message id={user_report["message_id"]}
+as harmful, giving this reason: "{user_report["reason"]}"
+
+Weigh this report as a meaningful human signal alongside your own reading of
+the messages above -- a person in the conversation saw something worth
+flagging, so you may conclude "harmful" even if the classifier's scores are
+low. Do not rubber-stamp it either: conclude "harmful" only if the reported
+message and its context actually support it, and always include the reported
+message in top_evidence_messages with your assessment reflected in its tags."""
 
     prompt = f"""You are a content-safety reasoning assistant. You are given every
 message in a conversation's scoring window, plus a pre-computed risk score
@@ -86,7 +114,7 @@ All messages in this conversation's scoring window, with the classifier's
 per-message contribution score (higher = the classifier attributes more
 responsibility to that message for the score above -- not an independent
 probability that this message alone is harmful):
-{chr(10).join(message_lines)}
+{chr(10).join(message_lines)}{report_section}
 
 Respond with ONLY a JSON object in this exact shape:
 {{
@@ -120,8 +148,8 @@ def _extract_json(text: str) -> str:
     return text[start : end + 1]
 
 
-def run_llm_reasoning(conversation_id, evidence_messages, conversation_score):
-    prompt = build_prompt(conversation_id, evidence_messages, conversation_score)
+def run_llm_reasoning(conversation_id, evidence_messages, conversation_score, user_report=None):
+    prompt = build_prompt(conversation_id, evidence_messages, conversation_score, user_report=user_report)
     client = _get_client()
 
     response = client.messages.create(

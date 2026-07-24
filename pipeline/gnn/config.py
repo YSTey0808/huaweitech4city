@@ -28,4 +28,11 @@ TOP_K_EVIDENCE = 3       # max messages the LLM is asked to CITE as evidence in 
                           # scoring window (see gnn/llm_stage.py) and judges from there;
                           # this only bounds how many it names back in top_evidence_messages.
 
+SKIP_LLM_BELOW = 0.05    # automatic scoring skips the LLM call entirely when the GNN's
+                          # conv_score is below this -- a "safe" verdict writes no rows
+                          # anyway (absence = safe), so nothing is lost, and the LLM cost
+                          # per obviously-benign message drops to zero. NEVER applied when
+                          # a user report is present (inference.score_conversation): a
+                          # report exists precisely to challenge a low score.
+
 LLM_MODEL = "claude-haiku-4-5-20251001"  # small/fast model — reasoning over a handful of pre-scored messages, not raw generation

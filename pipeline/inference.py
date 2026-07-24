@@ -29,6 +29,7 @@ import json
 
 import torch
 
+from gnn.config import SKIP_LLM_BELOW
 from gnn.conversation_gnn import build_message_graph, MessageGraphSAGE
 from gnn.llm_stage import run_llm_reasoning
 
@@ -58,6 +59,13 @@ def rank_messages(messages: list, per_message_scores: torch.Tensor) -> list:
     old top-k filter, since the one message and the conversation score are
     mathematically identical in that case; a longer conversation's real
     evidence could also be excluded if it didn't happen to score highest).
+
+    This also means a human-feedback report never needs to force a message
+    into visibility (an earlier version of this function had a
+    force_include_id param for exactly that) -- every message the reported
+    one is already unconditionally in this output. The only remaining
+    responsibility of the caller with a report is passing it to
+    run_llm_reasoning so the LLM knows to weigh it.
     """
     scored = sorted(
         zip(messages, per_message_scores.tolist()),
@@ -71,23 +79,46 @@ def rank_messages(messages: list, per_message_scores: torch.Tensor) -> list:
 
 
 @torch.no_grad()
-def score_conversation(conversation_id: str, messages: list, model: MessageGraphSAGE) -> dict:
+def score_conversation(conversation_id: str, messages: list, model: MessageGraphSAGE,
+                        user_report: dict = None) -> dict:
     """
     messages: chronological, already embedded (see module docstring).
     model: a loaded MessageGraphSAGE in eval mode (caller loads this once
         at startup -- see backend/app/main.py -- and passes it in here so
         it's never reloaded per request).
+    user_report: optional {message_id, reason} -- a human-feedback report
+        (backend POST /report). The reported message is already guaranteed
+        to be in `messages` (report_service.py anchors the fetched window on
+        it) and already guaranteed visible to the LLM (rank_messages filters
+        nothing) -- user_report only needs to reach run_llm_reasoning so the
+        LLM knows to weigh it, and to disable the SKIP_LLM_BELOW short-circuit
+        below (a report exists precisely to challenge a low score).
 
     Returns the LLM stage's structured verdict -- the LLM's own judgment,
     not a passthrough of the GNN's label (see gnn/llm_stage.py):
         {conversation_label, conversation_confidence, severity,
          top_evidence_messages: [{message_id, text, score, tags}],
          gentle_alert_text}
+
+    Cost short-circuit: on the automatic path (no user_report), a conv_score
+    below SKIP_LLM_BELOW returns a "safe" verdict without calling the LLM.
+    Zero information loss -- a safe verdict writes no rows downstream
+    (write_scores' "absence = safe" convention), and severity/reasoning are
+    only ever rendered for flagged conversations.
     """
     model.eval()
     graph = build_message_graph(messages)
     conv_score, per_message_scores = model.forward_full(graph)
 
+    if user_report is None and conv_score.item() < SKIP_LLM_BELOW:
+        return {
+            "conversation_label": "safe",
+            "conversation_confidence": 1.0 - conv_score.item(),
+            "severity": None,
+            "top_evidence_messages": [],
+            "gentle_alert_text": None,
+        }
+
     ranked = rank_messages(messages, per_message_scores)
-    raw_json = run_llm_reasoning(conversation_id, ranked, conv_score.item())
+    raw_json = run_llm_reasoning(conversation_id, ranked, conv_score.item(), user_report=user_report)
     return _parse_llm_json(raw_json)
