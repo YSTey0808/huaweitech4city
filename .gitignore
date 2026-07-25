@@ -14,3 +14,11 @@ backend/.venv/
 
 # frontend/ and supabase/ have their own .gitignore (node_modules, dist,
 # .env*, Supabase CLI's .branches/.temp) -- not duplicated here.
+
+# repo root -- the Supabase CLI was installed here as a local dev dependency
+# (npm install supabase --save-dev) so `npx supabase ...` works. None of this
+# belongs in git. Leading slash anchors to the root only, so frontend/'s own
+# package.json / node_modules are unaffected.
+/node_modules/
+/package.json
+/package-lock.json
