@@ -44,7 +44,7 @@ The backend never returns the model's raw verdict to the caller — it writes di
 | `ANTHROPIC_API_KEY` | yes | Read directly by `pipeline/gnn/llm_stage.py`; validated at backend startup so a missing key fails fast instead of deep inside the first LLM call |
 | `BACKEND_SHARED_SECRET` | yes | Must match what `supabase/functions/score-message` sends as `X-Backend-Secret` |
 | `ALLOWED_ORIGINS` | no (default `http://localhost:5173`) | Comma-separated list, not JSON — simpler to set correctly in Render's env var UI |
-| `CHECKPOINT_PATH` | no | Overrides the default (`pipeline/checkpoints/message_graph_sage.pt`, resolved relative to the repo layout) |
+| `CHECKPOINT_PATH` | no | Overrides the default (`pipeline/checkpoints/message_graph_sage_old.pt`, resolved relative to the repo layout — see `message_graph_sage_new.pt` for the newer-dataset checkpoint, not yet promoted to default) |
 | `EMBEDDING_DB_PATH` | no | Overrides the default local embedding cache location (`backend/data/embeddings.sqlite3`) |
 
 Copy the `backend/.env` section of the repo root's `.env.example` into `backend/.env` for local dev.

@@ -274,7 +274,7 @@ def main():
     parser.add_argument("--patience", type=int, default=None,
                          help="stop early after this many epochs with no new best val_macro_f1 "
                               "(default: disabled, always runs all --epochs)")
-    parser.add_argument("--checkpoint", default="checkpoints/message_graph_sage.pt")
+    parser.add_argument("--checkpoint", default="checkpoints/message_graph_sage_old.pt")
     args = parser.parse_args()
 
     print("Loading conversations and embeddings...")

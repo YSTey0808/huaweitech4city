@@ -7,6 +7,16 @@ __pycache__/
 pipeline/dataset/
 pipeline/preprocess/test_pipeline.py
 
+# pipeline/experiments/checkpoints/ -- throwaway checkpoints from one-off
+# training runs (e.g. learning-curve experiments), unlike the checkpoints
+# under pipeline/checkpoints/ which ARE committed. Scoped to just the
+# checkpoints subfolder (not all of pipeline/experiments/) so experiment
+# scripts themselves stay tracked. pipeline/reports/ (the analysis/results
+# of those experiments) is deliberately NOT ignored -- that's the actual
+# deliverable worth keeping.
+pipeline/experiments/checkpoints/
+pipeline/reports/
+
 # backend/ -- local embedding cache, secrets, and its virtualenv
 backend/data/
 backend/.env

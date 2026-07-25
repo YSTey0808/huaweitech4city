@@ -23,6 +23,9 @@ DROPOUT = 0.3            # applied after input_proj and after each GraphSAGE lay
 CONV_LABELS = ["safe", "harmful"]  # binary vocabulary, matches the canonical
                                     # `binary_conversation_label` schema field exactly
 
-TOP_K_EVIDENCE = 3       # how many messages get forwarded to the LLM stage as evidence
+TOP_K_EVIDENCE = 3       # max messages the LLM is asked to CITE as evidence in its response.
+                          # Not a filter on what it sees -- it sees every message in the
+                          # scoring window (see gnn/llm_stage.py) and judges from there;
+                          # this only bounds how many it names back in top_evidence_messages.
 
 LLM_MODEL = "claude-haiku-4-5-20251001"  # small/fast model — reasoning over a handful of pre-scored messages, not raw generation

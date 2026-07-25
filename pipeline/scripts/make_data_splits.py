@@ -22,18 +22,20 @@ then increasing-length prefixes are taken per fraction -- so the 25%
 subset is a strict subset of the 50% subset, which is a strict subset of
 the 75% subset.
 
-dataset/train.jsonl itself is the 100% split (unchanged, no new file).
-dataset/validation.jsonl is not touched -- use it as the fixed eval set
-across all four sizes so results are comparable.
+--source itself is the 100% split (unchanged, no new file needed for it).
+The corresponding validation file is never touched -- use it as the fixed
+eval set across all four sizes so results are comparable.
 
 Usage:
-    python make_data_splits.py
+    python make_data_splits.py                                     # dataset/train.jsonl -> train_{25,50,75}pct.jsonl
+    python make_data_splits.py --source dataset/train_new.jsonl     # -> train_new_{25,50,75}pct.jsonl
 """
 
+import argparse
 import json
 import random
+from pathlib import Path
 
-SOURCE = "dataset/train.jsonl"
 FRACTIONS = [0.25, 0.50, 0.75]
 SEED = 42
 HARM_TYPES_SCARCEST_FIRST = ["cyberbullying", "grooming", "scam"]
@@ -77,7 +79,13 @@ def split_harmful_quota(target_harmful: int, available: dict) -> dict:
 
 
 def main():
-    convs = load(SOURCE)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--source", default="dataset/train.jsonl")
+    args = parser.parse_args()
+    source = args.source
+    stem = Path(source).stem  # "train" -> train_25pct.jsonl; "train_new" -> train_new_25pct.jsonl
+
+    convs = load(source)
     by_category = {"safe": [], "scam": [], "cyberbullying": [], "grooming": []}
     for c in convs:
         by_category[c["conversation_label"]].append(c)
@@ -88,7 +96,7 @@ def main():
 
     total = len(convs)
     available = {k: len(v) for k, v in by_category.items()}
-    print(f"Source: {SOURCE} ({total} conversations)")
+    print(f"Source: {source} ({total} conversations)")
     print(f"Available per category: {available}\n")
 
     for frac in FRACTIONS:
@@ -104,7 +112,7 @@ def main():
             subset.extend(by_category[cat][:n])
         rng.shuffle(subset)  # interleave categories rather than leaving them grouped in the file
 
-        out_path = f"dataset/train_{int(frac * 100)}pct.jsonl"
+        out_path = f"dataset/{stem}_{int(frac * 100)}pct.jsonl"
         write(out_path, subset)
 
         actual_total = len(subset)
@@ -115,8 +123,8 @@ def main():
         binary_harmful = counts['scam'] + counts['cyberbullying'] + counts['grooming']
         print(f"  binary: safe={counts['safe']}  harmful={binary_harmful}\n")
 
-    print("dataset/train.jsonl itself is the 100% split -- no new file needed for it.")
-    print("dataset/validation.jsonl is untouched -- use it as the fixed eval set across all sizes.")
+    print(f"{source} itself is the 100% split -- no new file needed for it.")
+    print("The corresponding validation file is untouched -- use it as the fixed eval set across all sizes.")
 
 
 if __name__ == "__main__":

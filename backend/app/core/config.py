@@ -24,7 +24,11 @@ class Settings(BaseSettings):
     # Comma-separated, not JSON -- simpler to set correctly in Render's env var UI.
     allowed_origins: str = "http://localhost:5173"
 
-    checkpoint_path: Path = PIPELINE_DIR / "checkpoints" / "message_graph_sage.pt"
+    # message_graph_sage_old.pt = trained on the original dataset (unchanged production
+    # behavior). message_graph_sage_new.pt = trained on the newer, larger dataset (see
+    # pipeline/reports/learning_curve/) -- not yet promoted to default; swap deliberately,
+    # not as a side effect of a checkpoint file rename.
+    checkpoint_path: Path = PIPELINE_DIR / "checkpoints" / "message_graph_sage_old.pt"
     embedding_db_path: Path = BACKEND_DIR / "data" / "embeddings.sqlite3"
 
     score_window_size: int = 10  # last-N messages considered, matches the original mock's window

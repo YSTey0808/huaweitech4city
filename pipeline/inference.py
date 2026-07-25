@@ -13,9 +13,10 @@ for how it's loaded.
 Expected message shape (chronological order), already embedded upstream:
     message_id             str
     sender_id              str
-    text                   str   -- only used for the LLM evidence bundle,
-                                     never fed into the graph/GNN
-    embedding              FloatTensor[EMBED_DIM]
+    text                   str   -- sent to the LLM stage alongside every
+                                     other message in the window, never fed
+                                     into the graph/GNN itself
+    embedding               FloatTensor[EMBED_DIM]
     reply_to_message_id    str | None
 
 Graph edges (temporal/same_speaker/reply_to) are rebuilt fresh from message
@@ -28,17 +29,35 @@ import json
 
 import torch
 
-from gnn.config import TOP_K_EVIDENCE
 from gnn.conversation_gnn import build_message_graph, MessageGraphSAGE
 from gnn.llm_stage import run_llm_reasoning
 
 
-def top_k_evidence(messages: list, per_message_scores: torch.Tensor, k: int) -> list:
+def _parse_llm_json(raw_text: str) -> dict:
+    """The prompt asks Claude to respond with ONLY a JSON object, but it
+    sometimes wraps it in a ```json ... ``` markdown fence anyway -- strip
+    one if present before parsing, rather than letting json.loads fail on
+    the leading backticks (observed in practice, not a hypothetical)."""
+    text = raw_text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+    return json.loads(text.strip())
+
+
+def rank_messages(messages: list, per_message_scores: torch.Tensor) -> list:
     """
-    Ranks messages by their contribution score (see MessageGraphSAGE's
-    conv_head docstring for why this is a principled per-message signal)
-    and returns the top-k as the small evidence bundle the LLM stage is
-    deliberately given -- never the raw conversation.
+    Ranks every message in the window by its contribution score (see
+    MessageGraphSAGE's conv_head docstring for why this is a principled
+    per-message signal) -- highest first, for readable prompt ordering.
+    Unlike an earlier version of this function, nothing is filtered out:
+    the LLM stage judges from every message in the window, not a
+    GNN-selected top-k -- see gnn/llm_stage.py's module docstring for why
+    (a single-message conversation could never be second-guessed under the
+    old top-k filter, since the one message and the conversation score are
+    mathematically identical in that case; a longer conversation's real
+    evidence could also be excluded if it didn't happen to score highest).
     """
     scored = sorted(
         zip(messages, per_message_scores.tolist()),
@@ -47,7 +66,7 @@ def top_k_evidence(messages: list, per_message_scores: torch.Tensor, k: int) -> 
     )
     return [
         {"message_id": m["message_id"], "sender_id": m["sender_id"], "text": m["text"], "score": score}
-        for m, score in scored[:k]
+        for m, score in scored
     ]
 
 
@@ -59,7 +78,8 @@ def score_conversation(conversation_id: str, messages: list, model: MessageGraph
         at startup -- see backend/app/main.py -- and passes it in here so
         it's never reloaded per request).
 
-    Returns the LLM stage's structured verdict:
+    Returns the LLM stage's structured verdict -- the LLM's own judgment,
+    not a passthrough of the GNN's label (see gnn/llm_stage.py):
         {conversation_label, conversation_confidence, severity,
          top_evidence_messages: [{message_id, text, score, tags}],
          gentle_alert_text}
@@ -68,6 +88,6 @@ def score_conversation(conversation_id: str, messages: list, model: MessageGraph
     graph = build_message_graph(messages)
     conv_score, per_message_scores = model.forward_full(graph)
 
-    evidence = top_k_evidence(messages, per_message_scores, TOP_K_EVIDENCE)
-    raw_json = run_llm_reasoning(conversation_id, evidence, conv_score.item())
-    return json.loads(raw_json)
+    ranked = rank_messages(messages, per_message_scores)
+    raw_json = run_llm_reasoning(conversation_id, ranked, conv_score.item())
+    return _parse_llm_json(raw_json)
