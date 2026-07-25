@@ -104,8 +104,24 @@ classifier's highest-scoring ones."""
     return prompt
 
 
-def run_llm_reasoning(conversation_id, messages, conversation_score):
-    prompt = build_prompt(conversation_id, messages, conversation_score)
+def _extract_json(text: str) -> str:
+    """
+    The model is asked for a bare JSON object, but LLMs often wrap it in
+    ```json ... ``` fences or add a sentence before/after it. Pull out the
+    outermost {...} object so json.loads() downstream gets clean input.
+    Raises with the raw text if no object is present (empty reply, refusal),
+    so the failure is diagnosable instead of an opaque JSONDecodeError.
+    """
+    text = text.strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        raise RuntimeError(f"LLM did not return a JSON object. Raw response:\n{text!r}")
+    return text[start : end + 1]
+
+
+def run_llm_reasoning(conversation_id, evidence_messages, conversation_score):
+    prompt = build_prompt(conversation_id, evidence_messages, conversation_score)
     client = _get_client()
 
     response = client.messages.create(
@@ -114,4 +130,4 @@ def run_llm_reasoning(conversation_id, messages, conversation_score):
         messages=[{"role": "user", "content": prompt}],
     )
     raw_text = response.content[0].text
-    return raw_text
+    return _extract_json(raw_text)
