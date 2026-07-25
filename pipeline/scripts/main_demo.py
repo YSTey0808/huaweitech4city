@@ -35,7 +35,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # pipeline/ -- so gnn/ resolves as a sibling
 
-from gnn.config import EMBED_DIM, TOP_K_EVIDENCE
+from gnn.config import EMBED_DIM
 from gnn.conversation_gnn import build_message_graph, MessageGraphSAGE, ConversationGraphState
 from gnn.llm_stage import run_llm_reasoning
 
@@ -81,23 +81,24 @@ def run_conversation(conv_id, messages, model):
         batch_conv_score, _ = model.forward_full(graph)
     print(f"  Batch (cold-start) conv_score={batch_conv_score.item():.4f}  (streaming final was {conv_score:.4f})")
 
-    # --- evidence selection: top-k messages by streaming message_score ---
+    # --- rank every message by streaming message_score (highest first, for
+    # readable prompt ordering) -- the LLM judges from the whole window, not
+    # a pre-filtered subset; see gnn/llm_stage.py for why ---
     scored = sorted(zip(messages, state.message_scores), key=lambda pair: -pair[1])
-    top = scored[:min(TOP_K_EVIDENCE, len(messages))]
-    evidence_messages = [
+    ranked_messages = [
         {
             "message_id": m["message_id"],
             "text": m["text"],
             "sender_id": m["sender_id"],
             "score": round(score, 4),
         }
-        for m, score in top
+        for m, score in scored
     ]
 
     # --- LLM reasoning stage ---
     print("  Calling LLM for final reasoning...")
     try:
-        llm_output = run_llm_reasoning(conv_id, evidence_messages, conv_score)
+        llm_output = run_llm_reasoning(conv_id, ranked_messages, conv_score)
         print("  LLM output:")
         print(llm_output)
     except RuntimeError as e:

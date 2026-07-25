@@ -116,7 +116,7 @@ def run_inference(model: MessageGraphSAGE, input_jsonl: str, embed_model) -> Non
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--input-jsonl", default="dataset/train.jsonl")
-    parser.add_argument("--checkpoint", default="checkpoints/message_graph_sage.pt")
+    parser.add_argument("--checkpoint", default="checkpoints/message_graph_sage_old.pt")
     parser.add_argument("--model-name", default=DEFAULT_MODEL)
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--lr", type=float, default=1e-3)

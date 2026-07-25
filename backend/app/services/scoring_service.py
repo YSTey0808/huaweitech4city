@@ -63,10 +63,12 @@ def write_scores(supabase, conversation_id: str, result: dict) -> dict:
         supabase.table("conversation_scores").insert(payload).execute()
         conversation_status = "inserted"
 
-    # message_scores: one row per evidence message, using the same conversation-level
-    # label (there is no independent per-message label -- see pipeline/inference.py's
-    # top_k_evidence, scores are a contribution-to-the-verdict signal, not a separate
-    # classification). Skip messages that already have a row for this label.
+    # message_scores: one row per evidence message the LLM chose to cite (see
+    # gnn/llm_stage.py -- it judges from the full window, not a GNN-filtered
+    # subset), using the same conversation-level label (there is no
+    # independent per-message label; the GNN's per-message scores are a
+    # contribution-to-the-verdict signal, not a separate classification).
+    # Skip messages that already have a row for this label.
     inserted = 0
     if evidence_msg_ids:
         have_res = (
