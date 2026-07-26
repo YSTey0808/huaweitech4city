@@ -1,6 +1,0 @@
-torch
-torch_geometric
-numpy
-sentence-transformers
-anthropic
-python-dotenv

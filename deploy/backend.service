@@ -1,0 +1,25 @@
+# systemd unit for the huaweitech4city backend on a GCP (or any Linux) VM.
+#
+# Install on the VM:
+#   sudo cp deploy/backend.service /etc/systemd/system/backend.service
+#   sudo sed -i "s/<user>/$(whoami)/g" /etc/systemd/system/backend.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now backend
+#
+# Keeps the backend running independent of your SSH session, restarts it on
+# crash, and auto-starts it on VM reboot. See notes/DEPLOYMENT_PLAN.md Phase 1.
+
+[Unit]
+Description=huaweitech4city backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=<user>
+WorkingDirectory=/home/<user>/huaweitech4city/backend
+ExecStart=/home/<user>/huaweitech4city/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --env-file /home/<user>/huaweitech4city/backend/.env
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

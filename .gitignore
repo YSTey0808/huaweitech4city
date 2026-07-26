@@ -1,6 +1,34 @@
-dataset/
-checkpoints/
 __pycache__/
 .DS_Store
 
-preprocess/test_pipeline.py
+# pipeline/ -- training data stays local-only (large, not needed to serve).
+# checkpoints/ is deliberately NOT ignored -- committed to git (a few MB),
+# so Render's build has them without a separate fetch/LFS step.
+pipeline/dataset/
+pipeline/preprocess/test_pipeline.py
+
+# pipeline/experiments/checkpoints/ -- throwaway checkpoints from one-off
+# training runs (e.g. learning-curve experiments), unlike the checkpoints
+# under pipeline/checkpoints/ which ARE committed. Scoped to just the
+# checkpoints subfolder (not all of pipeline/experiments/) so experiment
+# scripts themselves stay tracked. pipeline/reports/ (the analysis/results
+# of those experiments) is deliberately NOT ignored -- that's the actual
+# deliverable worth keeping.
+pipeline/experiments/checkpoints/
+pipeline/reports/
+
+# backend/ -- local embedding cache, secrets, and its virtualenv
+backend/data/
+backend/.env
+backend/.venv/
+
+# frontend/ and supabase/ have their own .gitignore (node_modules, dist,
+# .env*, Supabase CLI's .branches/.temp) -- not duplicated here.
+
+# repo root -- the Supabase CLI was installed here as a local dev dependency
+# (npm install supabase --save-dev) so `npx supabase ...` works. None of this
+# belongs in git. Leading slash anchors to the root only, so frontend/'s own
+# package.json / node_modules are unaffected.
+/node_modules/
+/package.json
+/package-lock.json

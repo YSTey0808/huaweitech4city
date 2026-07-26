@@ -1,0 +1,14 @@
+# Local dev: only the backend runs here. Frontend runs via `npm run dev`
+# (frontend/) and Supabase via `supabase start` (repo root) -- see
+# docs/backend.md for running all three together.
+services:
+  backend:
+    build:
+      context: .                    # repo root -- backend/Dockerfile COPYs the sibling pipeline/ dir
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - backend/.env
+    volumes:
+      - ./pipeline/dataset:/app/pipeline/dataset:ro   # gitignored locally; mount if present
