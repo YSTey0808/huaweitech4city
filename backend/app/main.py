@@ -53,3 +53,12 @@ app.add_middleware(
 )
 
 app.include_router(score_router)
+
+
+@app.get("/health")
+async def health():
+    """Unauthenticated liveness probe — for platform health checks and the
+    keep-alive ping that keeps a free HF Space from sleeping. POST /score can't
+    serve this purpose: it requires the shared secret and does real work (an
+    Anthropic call), so it's neither free nor safe to ping."""
+    return {"status": "ok"}

@@ -27,7 +27,7 @@ The backend never returns the model's raw verdict to the caller — it writes di
 ## Request handling, step by step
 
 1. `backend/app/api/routes/score.py` verifies `X-Backend-Secret`.
-2. `backend/app/services/scoring_service.py::fetch_message_window()` reads the last `score_window_size` (default 10) messages for the conversation, oldest-first (matches the original mock's window).
+2. `backend/app/services/scoring_service.py::fetch_message_window()` reads the last 10 messages for the conversation — the `WINDOW_SIZE` constant in `scoring_service.py` — oldest-first (matches the original mock's window). (The `score_window_size` setting in `config.py` is not currently wired to this; the constant is the source of truth.)
 3. `backend/app/services/message_mapper.py::supabase_row_to_pipeline_message()` translates each row: `id`→`message_id`, `content`→`text`, `reply_to`→`reply_to_message_id`, `created_at` (timestamptz)→`timestamp` (epoch seconds), `sender_id` unchanged. This is the exact field-name/units drift flagged in the old `PROJECT_CONTEXT.md` — see [data_schema.md](data_schema.md#known-schema-issues).
 4. `backend/app/services/embedding_store.py::LocalEmbeddingStore.get_or_compute()` attaches an `embedding` to each message — cache hit for messages already scored before, compute (and persist) only for new ones.
 5. `pipeline/inference.py::score_conversation()` runs preprocess → embed → graph → GNN → LLM reasoning and returns the structured verdict (see [pipeline.md](pipeline.md)).
@@ -44,7 +44,7 @@ The backend never returns the model's raw verdict to the caller — it writes di
 | `ANTHROPIC_API_KEY` | yes | Read directly by `pipeline/gnn/llm_stage.py`; validated at backend startup so a missing key fails fast instead of deep inside the first LLM call |
 | `BACKEND_SHARED_SECRET` | yes | Must match what `supabase/functions/score-message` sends as `X-Backend-Secret` |
 | `ALLOWED_ORIGINS` | no (default `http://localhost:5173`) | Comma-separated list, not JSON — simpler to set correctly in Render's env var UI |
-| `CHECKPOINT_PATH` | no | Overrides the default (`pipeline/checkpoints/message_graph_sage_old.pt`, resolved relative to the repo layout — see `message_graph_sage_new.pt` for the newer-dataset checkpoint, not yet promoted to default) |
+| `CHECKPOINT_PATH` | no | Overrides the default (`pipeline/checkpoints/message_graph_sage_new.pt`, the newer-dataset checkpoint now promoted to the served default; `message_graph_sage_old.pt` is the original-dataset checkpoint, kept for comparison/rollback) |
 | `EMBEDDING_DB_PATH` | no | Overrides the default local embedding cache location (`backend/data/embeddings.sqlite3`) |
 
 Copy the `backend/.env` section of the repo root's `.env.example` into `backend/.env` for local dev.
@@ -56,8 +56,15 @@ cd backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r ../pipeline/requirements.txt -r requirements.txt
 cp ../.env.example .env   # keep only the `backend/.env` section, fill in real values
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --env-file .env
 ```
+
+> **`--env-file .env` matters locally.** `pipeline/gnn/llm_stage.py` reads
+> `ANTHROPIC_API_KEY` via `os.getenv`, and its `load_dotenv()` resolves relative to
+> the pipeline module — not `backend/.env` — so without `--env-file` the key isn't in
+> the process environment and the first LLM call raises `ANTHROPIC_API_KEY not set`.
+> (In production this is a non-issue: hosting platforms inject real environment
+> variables.)
 
 Or via Docker from the repo root:
 

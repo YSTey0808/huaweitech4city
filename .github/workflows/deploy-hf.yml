@@ -1,0 +1,43 @@
+name: deploy-to-hf-space
+
+# Auto-deploy the backend to a Hugging Face Docker Space on every push to main.
+# HF Spaces rebuild + redeploy automatically whenever their own git repo receives
+# a push, so this job bridges GitHub main -> the HF Space repo. The Space needs a
+# Dockerfile + README front-matter at its ROOT, which we generate in the runner
+# (a "shim") so main itself stays clean.
+#
+# One-time setup:
+#   - Create an HF *write* token (huggingface.co -> Settings -> Access Tokens).
+#   - Add it as a GitHub Actions secret named HF_TOKEN.
+#   - Replace <hf-user>/<space-name> below with your Space's coordinates.
+#
+# Note: the push trigger runs from the DEFAULT branch (main), so this file must
+# be on main to take effect.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add HF Space shim (root Dockerfile + README front-matter)
+        run: |
+          cp backend/Dockerfile Dockerfile
+          printf -- '---\ntitle: huaweitech4city-backend\nsdk: docker\napp_port: 8000\n---\n' > README.md
+          git config user.email "ci@users.noreply.github.com"
+          git config user.name "github-actions"
+          git add Dockerfile README.md
+          git commit -m "ci: HF Space shim"
+
+      - name: Force-push to HF Space (triggers rebuild + redeploy)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git push --force "https://ci:${HF_TOKEN}@huggingface.co/spaces/<hf-user>/<space-name>" HEAD:main

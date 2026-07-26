@@ -146,7 +146,7 @@ Supabase Realtime pushes INSERT/UPDATE on message_scores / conversation_scores
 
 Two different things persist, and only one of them is ever written to disk:
 
-- **Model weights** — `pipeline/checkpoints/message_graph_sage_old.pt` (production default) and `message_graph_sage_new.pt` (trained on the newer, larger dataset — see `pipeline/reports/learning_curve/`, not yet promoted to default), both committed to git (a few MB each). These are the only trained artifacts.
+- **Model weights** — `pipeline/checkpoints/message_graph_sage_new.pt` (production default — trained on the newer, larger dataset, see `pipeline/reports/learning_curve/`) and `message_graph_sage_old.pt` (trained on the original dataset; kept for comparison/rollback), both committed to git (a few MB each). These are the only trained artifacts.
 - **Message embeddings (graph nodes)** — the expensive-to-compute part (a `sentence-transformers` forward pass per message). Cached by `backend/app/services/embedding_store.py`'s `LocalEmbeddingStore` (SQLite, keyed by `message_id` + `model_version`), so a message is only ever embedded once, not once per score request.
 
 **The graph structure itself (nodes + edges as a `HeteroData` object) is never persisted.** `build_message_graph()` rebuilds the temporal/same_speaker/reply_to edges fresh from message metadata (order, `sender_id`, `reply_to_message_id`) on every `/score` call, then discards the graph right after the forward pass. This is deliberate, not an oversight: edges are cheap pure-Python bookkeeping over a small window (≤10 messages), so caching them isn't worth the complexity — only the embeddings (nodes) are worth caching.
