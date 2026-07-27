@@ -1,7 +1,7 @@
 """Tests for inference.py: rank_messages' ranking logic, and
-score_conversation's cost short-circuit + user_report wiring. build_message_graph
-and the real MessageGraphSAGE are swapped for fakes -- these tests are about
-the decision logic added around them, not GraphSAGE itself."""
+score_conversation's user_report wiring. build_message_graph and the real
+MessageGraphSAGE are swapped for fakes -- these tests are about the decision
+logic added around them, not GraphSAGE itself."""
 
 import json
 
@@ -9,7 +9,6 @@ import pytest
 import torch
 
 import inference
-from gnn.config import SKIP_LLM_BELOW
 
 
 def make_messages(n):
@@ -93,22 +92,13 @@ def llm_spy(monkeypatch):
     return calls
 
 
-def test_score_conversation_skips_llm_below_threshold_with_no_report(llm_spy):
+def test_score_conversation_always_calls_llm_even_on_a_very_low_score(llm_spy):
+    # Regression guard: an earlier version short-circuited the LLM call below
+    # a score threshold, which was removed because it undermined the very
+    # thing the LLM is there for -- catching a GNN that's confidently wrong
+    # on exactly the sparse/short conversations most likely to score low.
     messages = make_messages(3)
-    model = FakeModel(conv_score=SKIP_LLM_BELOW / 2, per_message_scores=[0.01, 0.01, 0.01])
-
-    result = inference.score_conversation("conv1", messages, model)
-
-    assert llm_spy == []  # LLM never called
-    assert result["conversation_label"] == "safe"
-    assert result["top_evidence_messages"] == []
-    assert result["severity"] is None
-    assert result["gentle_alert_text"] is None
-
-
-def test_score_conversation_calls_llm_above_threshold(llm_spy):
-    messages = make_messages(3)
-    model = FakeModel(conv_score=SKIP_LLM_BELOW * 10, per_message_scores=[0.9, 0.5, 0.1])
+    model = FakeModel(conv_score=0.001, per_message_scores=[0.001, 0.001, 0.001])
 
     result = inference.score_conversation("conv1", messages, model)
 
@@ -117,14 +107,14 @@ def test_score_conversation_calls_llm_above_threshold(llm_spy):
     assert result["conversation_label"] == "harmful"
 
 
-def test_score_conversation_always_calls_llm_when_reported_even_below_threshold(llm_spy):
+def test_score_conversation_forwards_user_report_to_llm(llm_spy):
     messages = make_messages(3)
-    model = FakeModel(conv_score=SKIP_LLM_BELOW / 2, per_message_scores=[0.01, 0.01, 0.01])
+    model = FakeModel(conv_score=0.5, per_message_scores=[0.5, 0.5, 0.5])
     user_report = {"message_id": "m1", "reason": "this is a scam"}
 
     result = inference.score_conversation("conv1", messages, model, user_report=user_report)
 
-    assert len(llm_spy) == 1  # the short-circuit must never apply to a report
+    assert len(llm_spy) == 1
     assert llm_spy[0]["user_report"] == user_report
     assert result["conversation_label"] == "harmful"
 

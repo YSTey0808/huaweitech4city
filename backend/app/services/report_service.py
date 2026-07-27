@@ -9,13 +9,12 @@ with three deliberate differences:
      older than the last WINDOW_SIZE would otherwise score a window that
      doesn't even contain it.
   2. The report ({message_id, reason}) is passed into the pipeline, which
-     frames it to the LLM as a human signal to weigh (and disables the
-     SKIP_LLM_BELOW cost short-circuit -- a report exists precisely to
-     challenge a low score). The reported message needs no special
-     forced-inclusion handling: the LLM already sees every message in the
-     window, not a filtered subset (see pipeline/inference.py's
-     rank_messages), and the window is anchored on the reported message
-     per point 1 above, so it's guaranteed present regardless.
+     frames it to the LLM as a human signal to weigh. The reported message
+     needs no special forced-inclusion handling: the LLM already sees every
+     message in the window on every call, not a filtered subset (see
+     pipeline/inference.py's rank_messages), and the window is anchored on
+     the reported message per point 1 above, so it's guaranteed present
+     regardless.
   3. Resulting rows are written with source='user_report' (vs 'model') so
      report-triggered findings stay distinguishable -- the audit trail.
 

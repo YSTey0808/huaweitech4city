@@ -29,7 +29,6 @@ import json
 
 import torch
 
-from gnn.config import SKIP_LLM_BELOW
 from gnn.conversation_gnn import build_message_graph, MessageGraphSAGE
 from gnn.llm_stage import run_llm_reasoning
 
@@ -91,8 +90,7 @@ def score_conversation(conversation_id: str, messages: list, model: MessageGraph
         to be in `messages` (report_service.py anchors the fetched window on
         it) and already guaranteed visible to the LLM (rank_messages filters
         nothing) -- user_report only needs to reach run_llm_reasoning so the
-        LLM knows to weigh it, and to disable the SKIP_LLM_BELOW short-circuit
-        below (a report exists precisely to challenge a low score).
+        LLM knows to weigh it.
 
     Returns the LLM stage's structured verdict -- the LLM's own judgment,
     not a passthrough of the GNN's label (see gnn/llm_stage.py):
@@ -100,24 +98,18 @@ def score_conversation(conversation_id: str, messages: list, model: MessageGraph
          top_evidence_messages: [{message_id, text, score, tags}],
          gentle_alert_text}
 
-    Cost short-circuit: on the automatic path (no user_report), a conv_score
-    below SKIP_LLM_BELOW returns a "safe" verdict without calling the LLM.
-    Zero information loss -- a safe verdict writes no rows downstream
-    (write_scores' "absence = safe" convention), and severity/reasoning are
-    only ever rendered for flagged conversations.
+    No score-based short-circuit: an earlier version skipped the LLM call
+    entirely when the GNN's conv_score was very low, on the reasoning that a
+    "safe" verdict writes no rows anyway. Removed because it directly
+    undermined this module's own design principle (see gnn/llm_stage.py) --
+    the GNN is least reliable on exactly the short/sparse conversations most
+    likely to produce a low score by chance, and a skipped call means
+    nothing ever gets to override a bad guess there. Always calling the LLM
+    is the correct tradeoff at current message volume.
     """
     model.eval()
     graph = build_message_graph(messages)
     conv_score, per_message_scores = model.forward_full(graph)
-
-    if user_report is None and conv_score.item() < SKIP_LLM_BELOW:
-        return {
-            "conversation_label": "safe",
-            "conversation_confidence": 1.0 - conv_score.item(),
-            "severity": None,
-            "top_evidence_messages": [],
-            "gentle_alert_text": None,
-        }
 
     ranked = rank_messages(messages, per_message_scores)
     raw_json = run_llm_reasoning(conversation_id, ranked, conv_score.item(), user_report=user_report)
