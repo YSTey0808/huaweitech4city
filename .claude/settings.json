@@ -1,7 +1,20 @@
 {
   "permissions": {
     "allow": [
-      "Bash(chmod +x deploy/redeploy.sh)"
+      "Bash(chmod +x deploy/redeploy.sh)",
+      "Bash(bash -n deploy/redeploy.sh)",
+      "Bash(python -c \"import yaml,sys; d=yaml.safe_load\\(open\\('/c/Github/tech4city/huaweitech4city/.github/workflows/deploy-vm.yml'\\)\\); print\\('deploy-vm.yml: YAML OK'\\); print\\('jobs:', list\\(d['jobs']\\)\\); print\\('triggers:', list\\(d[True] if True in d else d['on']\\)\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(git rev-list *)",
+      "Bash(gh repo *)",
+      "PowerShell($k = Get-Command ssh-keygen -ErrorAction SilentlyContinue; if \\($k\\) { \"ssh-keygen: $\\($k.Source\\)\"; & $k.Source -? 2>&1 | Select-Object -First 2 } else { \"ssh-keygen NOT on PATH\" }; \"---\"; \"HOME = $HOME\"; \"ssh dir exists: $\\(Test-Path \"$HOME\\\\.ssh\"\\)\"; if \\(Test-Path \"$HOME\\\\.ssh\"\\) { Get-ChildItem \"$HOME\\\\.ssh\" -Name })",
+      "PowerShell(gcloud projects list --format=\"table\\(projectId,name,projectNumber\\)\" 2>&1)",
+      "PowerShell(\"--- projects visible to this account ---\")",
+      "PowerShell(gcloud auth list --format=\"table\\(account,status\\)\")",
+      "PowerShell(gcloud config list --format=\"value\\(core.account,core.project\\)\")",
+      "PowerShell(gcloud config configurations list --format=\"table\\(name,is_active,account,project\\)\")",
+      "PowerShell(\"--- active config ---\")",
+      "PowerShell(\"--- named configurations ---\")"
     ]
   }
 }
