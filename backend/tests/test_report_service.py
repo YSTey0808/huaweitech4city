@@ -128,7 +128,7 @@ def test_report_message_request_dismissal_stamps_report_and_writes_no_scores(fak
     ]
     fake_supabase.store["message_reports"] = [
         {"msg_id": "m1", "conversation_id": "c1", "reason": "im sure this is bad",
-         "status": "pending", "created_at": "2026-07-22T00:01:00+00:00"},
+         "status": "pending", "claim": "harmful", "created_at": "2026-07-22T00:01:00+00:00"},
     ]
 
     def fake_score_conversation(conversation_id, messages, model, user_report=None,
@@ -239,6 +239,41 @@ def test_dispute_confirmed_deletes_conversation_row_when_evidence_empties(fake_s
     )
 
     assert fake_supabase.store["conversation_scores"] == []
+
+
+def test_dispute_outcome_does_not_restamp_an_older_harmful_report(fake_supabase, monkeypatch):
+    # A message that was reported harmful and confirmed (flagged), then later
+    # disputed. Processing the dispute must stamp ONLY the pending 'safe'
+    # report -- the older resolved 'harmful' report's audit fields stay put.
+    _seed_flagged_conversation(fake_supabase)
+    fake_supabase.store["message_reports"].append({
+        "msg_id": "m1", "conversation_id": "c1", "reason": "clearly grooming",
+        "status": "confirmed", "claim": "harmful",
+        "outcome_reasoning": "Confirmed: escalating pressure.",
+        "resolved_at": "2026-07-28T00:00:30+00:00",
+        "created_at": "2026-07-28T00:00:20+00:00",
+    })
+
+    _install_fake_inference(monkeypatch, lambda *a, **kw: {
+        "conversation_label": "safe", "conversation_confidence": 0.95,
+        "severity": None, "gentle_alert_text": "Harmless in context.", "top_evidence_messages": [],
+    })
+
+    report_message_request(
+        "c1", "m1", "thats just my aunt", fake_supabase,
+        embed_model=None, model="fake-model", embedding_store=FakeEmbeddingStore(),
+        model_version="v1", claim="safe",
+    )
+
+    harmful = next(r for r in fake_supabase.store["message_reports"]
+                   if r["claim"] == "harmful")
+    # Untouched: still its own confirmed harmful verdict, not the dispute's.
+    assert harmful["outcome_reasoning"] == "Confirmed: escalating pressure."
+    assert harmful["resolved_at"] == "2026-07-28T00:00:30+00:00"
+
+    safe = next(r for r in fake_supabase.store["message_reports"] if r["claim"] == "safe")
+    assert safe["status"] == "confirmed"
+    assert "Harmless in context" in safe["outcome_reasoning"]
 
 
 def test_dispute_rejected_leaves_flags_untouched(fake_supabase, monkeypatch):

@@ -41,11 +41,15 @@ from .scoring_service import SAFE_LABEL, fetch_message_window, write_scores
 from .watchlist_service import SupabaseWatchlist
 
 
-def _record_report_outcome(supabase, conversation_id: str, msg_id: str,
+def _record_report_outcome(supabase, conversation_id: str, msg_id: str, claim: str,
                             confirmed: bool, reasoning: str) -> str:
-    """Stamps the report row(s) for msg_id with the review outcome. Keyed by
-    (conversation_id, msg_id), not reporter -- if several members reported
-    the same message, they all get the same outcome. Failure-isolated like
+    """Stamps the pending report row(s) for this message and CLAIM direction
+    with the review outcome. Keyed by (conversation_id, msg_id, claim,
+    status='pending'), not reporter -- if several members filed the same
+    kind of report on the same message they share the verdict, but an older
+    already-resolved report in the OTHER direction (e.g. a past harmful
+    report on a message now being disputed) is left untouched, so its audit
+    fields aren't overwritten by an unrelated review. Failure-isolated like
     the watchlist fetch: the scoring side effects already happened, so a
     failed stamp must not fail the request (the report just stays 'pending'
     and the UI keeps showing "awaiting review")."""
@@ -59,7 +63,8 @@ def _record_report_outcome(supabase, conversation_id: str, msg_id: str,
             # explanation here.
             "outcome_reasoning": reasoning,
             "resolved_at": datetime.now(timezone.utc).isoformat(),
-        }).eq("conversation_id", conversation_id).eq("msg_id", msg_id).execute()
+        }).eq("conversation_id", conversation_id).eq("msg_id", msg_id) \
+          .eq("claim", claim).eq("status", "pending").execute()
     except Exception as e:
         print(f"recording report outcome failed (report stays pending): {e}")
     return status
@@ -139,5 +144,6 @@ def report_message_request(
         out = write_scores(supabase, conversation_id, result, source="user_report")
         confirmed = not verdict_safe
 
-    out["report_status"] = _record_report_outcome(supabase, conversation_id, msg_id, confirmed, reasoning)
+    out["report_status"] = _record_report_outcome(
+        supabase, conversation_id, msg_id, claim, confirmed, reasoning)
     return out
