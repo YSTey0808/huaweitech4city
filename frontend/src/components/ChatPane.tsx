@@ -32,6 +32,7 @@ function MessageBubble({
   reportOpen,
   onToggleReport,
   onSubmitReport,
+  onEscalate,
 }: {
   msg: ChatMessage
   own: boolean
@@ -43,9 +44,11 @@ function MessageBubble({
   reportOpen: boolean
   onToggleReport: () => void
   onSubmitReport: (reason: string, claim: ReportClaim) => Promise<boolean>
+  onEscalate: () => Promise<boolean>
 }) {
   const [reason, setReason] = useState('')
   const [submitState, setSubmitState] = useState<'idle' | 'submitting' | 'failed'>('idle')
+  const [escalateState, setEscalateState] = useState<'idle' | 'submitting' | 'failed'>('idle')
   // Directly flagged (red) beats evidence-of-conversation-score (amber).
   const flagged = scores !== undefined && scores.length > 0
   const highlight = flagged ? 'ring-2 ring-red-400' : isEvidence ? 'ring-2 ring-amber-400' : ''
@@ -127,6 +130,34 @@ function MessageBubble({
                   )}
                 </>
               )}
+
+              {/* Escalation (migration 011) -- one shared block for both
+                  claim directions: whenever the LLM dismissed the report
+                  (disagreed with the human), offer a second, human opinion.
+                  Once escalated it's a durable record for reviewers /
+                  retraining, so the button gives way to a confirmation. */}
+              {reportOutcome.status === 'dismissed' &&
+                (reportOutcome.escalatedAt ? (
+                  <p className="mt-1 text-slate-500">Escalated for human review</p>
+                ) : (
+                  <div className="mt-1">
+                    <button
+                      onClick={async () => {
+                        if (escalateState === 'submitting') return
+                        setEscalateState('submitting')
+                        const ok = await onEscalate()
+                        setEscalateState(ok ? 'idle' : 'failed')
+                      }}
+                      disabled={escalateState === 'submitting'}
+                      className="text-slate-500 underline hover:text-slate-700 disabled:opacity-50"
+                    >
+                      {escalateState === 'submitting' ? 'Escalating…' : 'Escalate to human review'}
+                    </button>
+                    {escalateState === 'failed' && (
+                      <p className="mt-0.5 text-red-600">Couldn't escalate. Please try again.</p>
+                    )}
+                  </div>
+                ))}
             </div>
           ) : reportOpen ? (
             <div className="mt-1 space-y-1">
@@ -197,7 +228,7 @@ export default function ChatPane({ conversationId, friend }: ChatPaneProps) {
     loading: scoresLoading,
     error: scoresError,
   } = useScores(conversationId)
-  const { reports, report } = useMessageReport(conversationId)
+  const { reports, report, escalate } = useMessageReport(conversationId)
   const [draft, setDraft] = useState('')
   const [alertsOpen, setAlertsOpen] = useState(false)
   // Which message's inline report form is open -- only one at a time.
@@ -316,6 +347,7 @@ export default function ChatPane({ conversationId, friend }: ChatPaneProps) {
                   if (ok) setReportingId(null)
                   return ok
                 }}
+                onEscalate={() => escalate(m.id)}
               />
             ))
           )}

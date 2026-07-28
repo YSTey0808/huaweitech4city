@@ -9,6 +9,7 @@ export interface ReportOutcome {
   status: string // 'pending' | 'confirmed' | 'dismissed' (open-ended, see types/db.ts)
   claim: string // 'harmful' (model missed this) | 'safe' (false-positive dispute)
   outcomeReasoning: string | null
+  escalatedAt: string | null // set once the reporter escalates a dismissal (migration 011)
 }
 
 // Fire-and-forget re-scoring trigger, same shape as useMessages.ts's
@@ -45,7 +46,12 @@ export function useMessageReport(conversationId: string | undefined) {
       // already-known verdict either.
       const existing = prev.get(msgId)
       if (existing && existing.status !== 'pending' && outcome.status === 'pending') return prev
-      return new Map(prev).set(msgId, outcome)
+      // Escalation only ever goes null -> set and is never reset (RPC guard,
+      // migration 011), so a known escalatedAt is preserved against any
+      // stale row that predates it (e.g. a late echo of the pre-escalation
+      // outcome, or the optimistic escalate racing the Realtime confirm).
+      const escalatedAt = outcome.escalatedAt ?? existing?.escalatedAt ?? null
+      return new Map(prev).set(msgId, { ...outcome, escalatedAt })
     })
   }, [])
 
@@ -60,6 +66,7 @@ export function useMessageReport(conversationId: string | undefined) {
           status: row.status,
           claim: row.claim,
           outcomeReasoning: row.outcome_reasoning,
+          escalatedAt: row.escalated_at,
         })
       }
     }
@@ -92,7 +99,7 @@ export function useMessageReport(conversationId: string | undefined) {
 
     supabase
       .from('message_reports')
-      .select('msg_id, status, claim, outcome_reasoning')
+      .select('msg_id, status, claim, outcome_reasoning, escalated_at')
       .eq('conversation_id', conversationId)
       .then(({ data, error }) => {
         if (cancelled) return
@@ -105,6 +112,7 @@ export function useMessageReport(conversationId: string | undefined) {
             status: row.status as string,
             claim: row.claim as string,
             outcomeReasoning: row.outcome_reasoning as string | null,
+            escalatedAt: row.escalated_at as string | null,
           })
         }
       })
@@ -140,12 +148,40 @@ export function useMessageReport(conversationId: string | undefined) {
 
       // Optimistic 'pending'; the Realtime echo (and later the backend's
       // outcome UPDATE) converge through the same upsert.
-      upsertOutcome(msgId, { status: 'pending', claim, outcomeReasoning: null })
+      upsertOutcome(msgId, { status: 'pending', claim, outcomeReasoning: null, escalatedAt: null })
       requestReportRescoring(conversationId, msgId, trimmed, claim)
       return true
     },
     [conversationId, user, upsertOutcome],
   )
 
-  return { reports, report }
+  // Escalate a dismissed report for human review. The RPC (migration 011)
+  // is the single authoritative write -- it pins the change to escalated_at
+  // and enforces the guards (own row, dismissed, not already escalated)
+  // server-side, so the client only reflects the result optimistically.
+  const escalate = useCallback(
+    async (msgId: string): Promise<boolean> => {
+      if (!conversationId) return false
+      const { error } = await supabase.rpc('escalate_report', {
+        _msg_id: msgId,
+        _conversation_id: conversationId,
+      })
+      if (error) {
+        console.warn('escalate failed:', error.message)
+        return false
+      }
+      // Optimistically stamp escalatedAt on the existing outcome; the
+      // Realtime UPDATE echo brings the authoritative timestamp, preserved
+      // by upsertOutcome's null->set monotonicity.
+      setReports((prev) => {
+        const existing = prev.get(msgId)
+        if (!existing || existing.escalatedAt) return prev
+        return new Map(prev).set(msgId, { ...existing, escalatedAt: new Date().toISOString() })
+      })
+      return true
+    },
+    [conversationId],
+  )
+
+  return { reports, report, escalate }
 }

@@ -89,5 +89,8 @@ export interface MessageReport {
   status: string;
   outcome_reasoning: string | null;
   resolved_at: string | null;
+  // Set (migration 011) when the reporter escalates a dismissed outcome for
+  // human review -- the durable signal a reviewer / retraining pipeline reads.
+  escalated_at: string | null;
   created_at: string;
 }
