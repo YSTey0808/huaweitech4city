@@ -24,7 +24,7 @@ function json(body: unknown, status = 200): Response {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
-  const { conversation_id, msg_id, reason } = await req.json().catch(() => ({}))
+  const { conversation_id, msg_id, reason, claim = 'harmful' } = await req.json().catch(() => ({}))
   if (typeof conversation_id !== 'string' || !conversation_id) {
     return json({ error: 'conversation_id required' }, 400)
   }
@@ -33,6 +33,11 @@ Deno.serve(async (req) => {
   }
   if (typeof reason !== 'string' || !reason.trim()) {
     return json({ error: 'reason required' }, 400)
+  }
+  // claim direction (migration 010): 'harmful' = model missed this;
+  // 'safe' = false-positive dispute.
+  if (claim !== 'harmful' && claim !== 'safe') {
+    return json({ error: "claim must be 'harmful' or 'safe'" }, 400)
   }
 
   // Identify the caller from the forwarded JWT.
@@ -75,7 +80,7 @@ Deno.serve(async (req) => {
         'Content-Type': 'application/json',
         'X-Backend-Secret': backendSecret,
       },
-      body: JSON.stringify({ conversation_id, msg_id, reason: reason.trim() }),
+      body: JSON.stringify({ conversation_id, msg_id, reason: reason.trim(), claim }),
     })
     const body = await res.json().catch(() => ({}))
     return json(body, res.status)

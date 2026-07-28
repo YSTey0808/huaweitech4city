@@ -62,6 +62,46 @@ def test_build_prompt_report_asks_for_dismissal_reasoning():
     assert 'If you conclude "safe" despite this report' in normalized
 
 
+def test_build_prompt_safe_claim_renders_dispute_section():
+    user_report = {"message_id": "m1", "reason": "thats just my aunt", "claim": "safe"}
+    prompt = llm_stage.build_prompt("conv1", EVIDENCE, 0.9, user_report=user_report)
+    assert "DISPUTED the flag on message" in prompt
+    assert "thats just my aunt" in prompt
+    assert "REPORTED message id=" not in prompt  # not the harmful-claim framing
+    # And the flag-stands explanation ask is present for rejections.
+    normalized = " ".join(prompt.split())
+    assert 'If you conclude "harmful" despite this dispute' in normalized
+
+
+def test_build_prompt_missing_claim_defaults_to_harmful_framing():
+    # Pre-claim callers pass {message_id, reason} only -- must keep the
+    # original report framing, not the dispute one.
+    user_report = {"message_id": "m2", "reason": "scam"}
+    prompt = llm_stage.build_prompt("conv1", EVIDENCE, 0.05, user_report=user_report)
+    assert "REPORTED message id=m2" in prompt
+    assert "DISPUTED" not in prompt
+
+
+def test_build_prompt_safe_examples_render_as_false_positive_section():
+    examples = [
+        {"text": "send otp now", "reason": "otp scam", "label": "scam"},
+        {"text": "eh you free tonight", "reason": "just my aunt", "label": "safe"},
+    ]
+    prompt = llm_stage.build_prompt("conv1", EVIDENCE, 0.5, confirmed_examples=examples)
+    assert "Known harmful patterns" in prompt
+    assert "Known FALSE-POSITIVE patterns" in prompt
+    assert '"eh you free tonight"' in prompt
+    # Safe examples live in the false-positive section, after the harmful one.
+    assert prompt.index("Known harmful patterns") < prompt.index("Known FALSE-POSITIVE patterns")
+
+
+def test_build_prompt_only_safe_examples_renders_only_false_positive_section():
+    examples = [{"text": "eh you free tonight", "reason": "just my aunt", "label": "safe"}]
+    prompt = llm_stage.build_prompt("conv1", EVIDENCE, 0.5, confirmed_examples=examples)
+    assert "Known FALSE-POSITIVE patterns" in prompt
+    assert "Known harmful patterns" not in prompt
+
+
 def test_build_prompt_without_examples_has_no_examples_section():
     prompt = llm_stage.build_prompt("conv1", EVIDENCE, 0.75)
     assert "Known harmful patterns" not in prompt

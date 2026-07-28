@@ -1,30 +1,36 @@
 """
 Orchestrates one /report request -- the human-feedback loop's immediate
-half. Mirrors scoring_service.score_conversation_request() stage for
-stage (fetch window -> attach embeddings -> pipeline -> write scores),
-with three deliberate differences:
+half, in both directions (migration 010's claim):
 
-  1. The message window is anchored to END at the reported message
-     (fetch_message_window's up_to_message_id) -- a report on a message
-     older than the last WINDOW_SIZE would otherwise score a window that
-     doesn't even contain it.
-  2. The report ({message_id, reason}) is passed into the pipeline, which
-     frames it to the LLM as a human signal to weigh. The reported message
-     needs no special forced-inclusion handling: the LLM already sees every
-     message in the window on every call, not a filtered subset (see
-     pipeline/inference.py's rank_messages), and the window is anchored on
-     the reported message per point 1 above, so it's guaranteed present
-     regardless.
-  3. Resulting rows are written with source='user_report' (vs 'model') so
-     report-triggered findings stay distinguishable -- the audit trail.
+  claim='harmful' -- "the model missed this." Window is re-scored with the
+      report as context; if the LLM agrees, score rows are written with
+      source='user_report' (see scoring_service.write_scores).
+  claim='safe' -- "the model flagged this wrongly" (false-positive
+      dispute). Same re-scoring, dispute-framed prompt; if the LLM agrees
+      the message is harmless, the flag is ANNULLED: its message_scores
+      rows are deleted and it is pruned from any conversation_scores
+      evidence list (row deleted outright if that empties it). The audit
+      trail survives in message_reports (claim + status + reasoning) --
+      score rows only ever reflect the current live verdict, history lives
+      in the reports log. A rejected dispute changes nothing: existing
+      rows keep their original source (never re-stamped 'user_report',
+      which is reserved for human-confirmed HARM).
+
+Both directions share the mechanics: the window is anchored to END at the
+reported message (fetch_message_window's up_to_message_id -- an older
+message would otherwise fall outside the scored window entirely), the
+report is passed to the pipeline as prompt context (no forced-inclusion
+needed; the LLM sees every message in the window, see
+pipeline/inference.py's rank_messages), and afterwards the report row is
+stamped with its outcome (status / outcome_reasoning / resolved_at,
+migration 009) so the reporter's client streams the verdict over Realtime.
+"confirmed" always means "the LLM agreed with the CLAIM" -- for a dispute
+that's a 'safe' verdict, the inverse of a report.
 
 The message_reports row itself is inserted by the frontend directly
-(RLS-guarded), not here -- this service only runs the re-scoring, then
-stamps the report row's outcome (status / outcome_reasoning / resolved_at,
-see migration 009) so the reporter's client can stream the verdict over
-Realtime instead of a dismissal vanishing into silence. The Edge Function
-has already verified the caller's membership before this is reached, but
-msg_id is still re-checked against conversation_id below
+(RLS-guarded), not here -- this service only runs the re-scoring and
+outcome. The Edge Function has already verified the caller's membership,
+but msg_id is still re-checked against conversation_id
 (fetch_message_window returns [] on a mismatched anchor) since the
 backend must not trust a caller-supplied pairing.
 """
@@ -35,26 +41,55 @@ from .scoring_service import SAFE_LABEL, fetch_message_window, write_scores
 from .watchlist_service import SupabaseWatchlist
 
 
-def _record_report_outcome(supabase, conversation_id: str, msg_id: str, result: dict) -> str:
-    """Stamps the report row(s) for msg_id with the LLM's verdict. Keyed by
+def _record_report_outcome(supabase, conversation_id: str, msg_id: str,
+                            confirmed: bool, reasoning: str) -> str:
+    """Stamps the report row(s) for msg_id with the review outcome. Keyed by
     (conversation_id, msg_id), not reporter -- if several members reported
     the same message, they all get the same outcome. Failure-isolated like
-    the watchlist fetch: scores were already written, so a failed stamp
-    must not fail the request (the report just stays 'pending' and the UI
-    keeps showing "awaiting review")."""
-    status = "dismissed" if result["conversation_label"] == SAFE_LABEL else "confirmed"
+    the watchlist fetch: the scoring side effects already happened, so a
+    failed stamp must not fail the request (the report just stays 'pending'
+    and the UI keeps showing "awaiting review")."""
+    status = "confirmed" if confirmed else "dismissed"
     try:
         supabase.table("message_reports").update({
             "status": status,
-            # On dismissal the prompt asks the LLM to address the reporter's
-            # stated reason in gentle_alert_text (see gnn/llm_stage.py) --
-            # that same sentence doubles as the outcome explanation here.
-            "outcome_reasoning": result.get("gentle_alert_text"),
+            # On a rejection the prompt asks the LLM to address the
+            # reporter's stated reason in gentle_alert_text (see
+            # gnn/llm_stage.py) -- that sentence doubles as the outcome
+            # explanation here.
+            "outcome_reasoning": reasoning,
             "resolved_at": datetime.now(timezone.utc).isoformat(),
         }).eq("conversation_id", conversation_id).eq("msg_id", msg_id).execute()
     except Exception as e:
         print(f"recording report outcome failed (report stays pending): {e}")
     return status
+
+
+def _annul_message_flags(supabase, conversation_id: str, msg_id: str) -> None:
+    """Confirmed false positive: remove the wrong flag so the UI clears.
+    Deletes the message's message_scores rows and prunes it from every
+    conversation_scores evidence list, deleting a conversation row outright
+    when that was its only evidence. The dispute's own message_reports row
+    (claim/status/reasoning) is the durable audit record of this action."""
+    supabase.table("message_scores").delete().eq("msg_id", msg_id).execute()
+
+    conv_res = (
+        supabase.table("conversation_scores")
+        .select("id, evidence_msg_ids")
+        .eq("conversation_id", conversation_id)
+        .execute()
+    )
+    for row in conv_res.data:
+        evidence = row.get("evidence_msg_ids") or []
+        if msg_id not in evidence:
+            continue
+        remaining = [mid for mid in evidence if mid != msg_id]
+        if remaining:
+            supabase.table("conversation_scores").update(
+                {"evidence_msg_ids": remaining}
+            ).eq("id", row["id"]).execute()
+        else:
+            supabase.table("conversation_scores").delete().eq("id", row["id"]).execute()
 
 
 def report_message_request(
@@ -66,6 +101,7 @@ def report_message_request(
     model,
     embedding_store,
     model_version: str,
+    claim: str = "harmful",
 ) -> dict:
     messages = fetch_message_window(supabase, conversation_id, up_to_message_id=msg_id)
     if not messages:
@@ -76,15 +112,32 @@ def report_message_request(
 
     messages = embedding_store.get_or_compute(messages, embed_model, model_version)
     # Past confirmed reports as reference patterns, same as the automatic
-    # path. The report being processed right now is not yet confirmed (its
-    # score rows don't exist until write_scores below), so it can't appear
-    # in its own examples list.
+    # path. The report being processed right now is still 'pending' (its
+    # outcome is stamped below), so it can't appear in its own examples.
     confirmed_examples = SupabaseWatchlist(supabase).get_confirmed_examples()
     result = score_conversation(
         conversation_id, messages, model,
-        user_report={"message_id": msg_id, "reason": reason},
+        user_report={"message_id": msg_id, "reason": reason, "claim": claim},
         confirmed_examples=confirmed_examples,
     )
-    out = write_scores(supabase, conversation_id, result, source="user_report")
-    out["report_status"] = _record_report_outcome(supabase, conversation_id, msg_id, result)
+
+    verdict_safe = result["conversation_label"] == SAFE_LABEL
+    reasoning = result.get("gentle_alert_text")
+
+    if claim == "safe":
+        # Dispute: never write score rows (a safe verdict writes nothing by
+        # convention, and a harmful verdict here means the EXISTING flag
+        # stands as-is -- re-writing it would wrongly stamp it
+        # source='user_report', which is reserved for human-confirmed harm).
+        if verdict_safe:
+            _annul_message_flags(supabase, conversation_id, msg_id)
+            out = {"conversation_scores": "annulled", "message_scores_inserted": 0}
+        else:
+            out = {"conversation_scores": "flag_stands", "message_scores_inserted": 0}
+        confirmed = verdict_safe
+    else:
+        out = write_scores(supabase, conversation_id, result, source="user_report")
+        confirmed = not verdict_safe
+
+    out["report_status"] = _record_report_outcome(supabase, conversation_id, msg_id, confirmed, reasoning)
     return out

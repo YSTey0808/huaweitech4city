@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase'
 import { useMessages } from '../hooks/useMessages'
 import type { ChatMessage } from '../hooks/useMessages'
 import { useMessageReport } from '../hooks/useMessageReport'
-import type { ReportOutcome } from '../hooks/useMessageReport'
+import type { ReportClaim, ReportOutcome } from '../hooks/useMessageReport'
 import { useScores } from '../hooks/useScores'
 import AlertPanel from './AlertPanel'
 import Avatar from './Avatar'
@@ -42,7 +42,7 @@ function MessageBubble({
   reportOutcome?: ReportOutcome // present iff this user reported this message
   reportOpen: boolean
   onToggleReport: () => void
-  onSubmitReport: (reason: string) => Promise<boolean>
+  onSubmitReport: (reason: string, claim: ReportClaim) => Promise<boolean>
 }) {
   const [reason, setReason] = useState('')
   const [submitState, setSubmitState] = useState<'idle' | 'submitting' | 'failed'>('idle')
@@ -92,21 +92,31 @@ function MessageBubble({
             formatTime(msg.created_at)
           )}
         </p>
-        {/* Reporting a message you sent yourself doesn't fit "flag harm from
-            someone else" in a 2-party DM, so this is only offered on the
-            other person's messages. Already-flagged messages hide the
-            action entirely (nothing left to catch) -- except the report
-            outcome line itself, which stays visible even if this user's own
-            report is what caused the flag. Outcome states (migration 009):
-            pending = re-scoring still running; confirmed = LLM agreed (the
-            flag UI above shows the result); dismissed = LLM reviewed and
-            disagreed, with its reasoning shown so the report doesn't vanish
-            into silence. */}
+        {/* Feedback affordance -- only on the other person's messages
+            (reporting/disputing your own doesn't fit a 2-party DM). The
+            direction follows the message's current state (migration 010):
+            unflagged -> "Report" (claim harmful, the model missed this);
+            flagged -> "Not harmful?" (claim safe, dispute a false positive).
+            Outcome states (migration 009): pending = re-scoring still
+            running; confirmed = LLM agreed with the claim (flag appears or
+            is removed accordingly); dismissed = LLM disagreed, with its
+            reasoning shown so no report vanishes into silence. */}
         {!own &&
           (reportOutcome ? (
             <div className="mt-1 text-[11px] text-slate-400">
               {reportOutcome.status === 'pending' ? (
-                <p>Reported — awaiting review</p>
+                <p>{reportOutcome.claim === 'safe' ? 'Feedback sent' : 'Reported'} — awaiting review</p>
+              ) : reportOutcome.claim === 'safe' ? (
+                reportOutcome.status === 'confirmed' ? (
+                  <p className="text-emerald-700">Feedback accepted — flag removed</p>
+                ) : (
+                  <>
+                    <p>Feedback reviewed — flag stands</p>
+                    {reportOutcome.outcomeReasoning && (
+                      <p className="mt-0.5 italic text-slate-500">{reportOutcome.outcomeReasoning}</p>
+                    )}
+                  </>
+                )
               ) : reportOutcome.status === 'confirmed' ? (
                 <p className="text-red-600">Reported — confirmed and flagged</p>
               ) : (
@@ -118,12 +128,12 @@ function MessageBubble({
                 </>
               )}
             </div>
-          ) : flagged ? null : reportOpen ? (
+          ) : reportOpen ? (
             <div className="mt-1 space-y-1">
               <textarea
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
-                placeholder="Why does this seem harmful?"
+                placeholder={flagged ? 'Why is this message not harmful?' : 'Why does this seem harmful?'}
                 rows={2}
                 autoFocus
                 className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
@@ -133,9 +143,10 @@ function MessageBubble({
                   onClick={async () => {
                     if (!reason.trim() || submitState === 'submitting') return
                     setSubmitState('submitting')
-                    // Only clear the typed reason on success -- on failure it
-                    // stays put so the user can retry without retyping.
-                    const ok = await onSubmitReport(reason)
+                    // Claim follows the flag state at submit time; only clear
+                    // the typed reason on success -- on failure it stays put
+                    // so the user can retry without retyping.
+                    const ok = await onSubmitReport(reason, flagged ? 'safe' : 'harmful')
                     if (ok) {
                       setReason('')
                       setSubmitState('idle')
@@ -144,7 +155,9 @@ function MessageBubble({
                     }
                   }}
                   disabled={!reason.trim() || submitState === 'submitting'}
-                  className="rounded bg-red-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                  className={`rounded px-2 py-0.5 text-[11px] font-medium text-white disabled:opacity-50 ${
+                    flagged ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'
+                  }`}
                 >
                   {submitState === 'submitting' ? 'Submitting…' : 'Submit'}
                 </button>
@@ -157,7 +170,7 @@ function MessageBubble({
               </div>
               {submitState === 'failed' && (
                 <p className="text-[11px] text-red-600">
-                  Couldn't submit the report. Please try again.
+                  Couldn't submit. Please try again.
                 </p>
               )}
             </div>
@@ -166,7 +179,7 @@ function MessageBubble({
               onClick={onToggleReport}
               className="mt-0.5 text-[11px] text-slate-400 underline hover:text-slate-600"
             >
-              Report
+              {flagged ? 'Not harmful?' : 'Report'}
             </button>
           ))}
       </div>
@@ -298,8 +311,8 @@ export default function ChatPane({ conversationId, friend }: ChatPaneProps) {
                 reportOutcome={reports.get(m.id)}
                 reportOpen={reportingId === m.id}
                 onToggleReport={() => setReportingId((id) => (id === m.id ? null : m.id))}
-                onSubmitReport={async (reason) => {
-                  const ok = await report(m.id, reason)
+                onSubmitReport={async (reason, claim) => {
+                  const ok = await report(m.id, reason, claim)
                   if (ok) setReportingId(null)
                   return ok
                 }}

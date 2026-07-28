@@ -5,6 +5,10 @@ class ReportRequest(BaseModel):
     conversation_id: str
     msg_id: str
     reason: str
+    # What the reporter asserts (migration 010): 'harmful' = the model
+    # missed this; 'safe' = false-positive dispute. Defaults to 'harmful'
+    # so pre-claim clients keep working unchanged.
+    claim: str = "harmful"
 
     @field_validator("reason")
     @classmethod
@@ -14,3 +18,11 @@ class ReportRequest(BaseModel):
         if not v.strip():
             raise ValueError("reason must not be blank")
         return v.strip()
+
+    @field_validator("claim")
+    @classmethod
+    def claim_known(cls, v: str) -> str:
+        # Mirrors migration 010's check constraint.
+        if v not in ("harmful", "safe"):
+            raise ValueError("claim must be 'harmful' or 'safe'")
+        return v

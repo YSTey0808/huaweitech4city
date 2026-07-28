@@ -69,21 +69,25 @@ def build_prompt(conversation_id, messages, conversation_score, user_report=None
     conversation_score: float in [0,1] -- P(harmful) for the conversation as
         a whole, from MessageGraphSAGE's pooled conversation-level head.
         Also a signal to weigh, not ground truth.
-    user_report: optional dict {message_id, reason} -- a human-feedback
-        report filed by a conversation member who believes message_id is
-        harmful despite the model not flagging it. Since every message is
-        already visible to the LLM (see module docstring), this needs no
-        forced-inclusion mechanism -- it's just extra context, framed as a
-        strong signal to weigh, not an automatic override. `reason` is free
-        user text embedded in the prompt -- same category of exposure as any
-        other message's text above, not a new one.
+    user_report: optional dict {message_id, reason, claim} -- a
+        human-feedback report filed by a conversation member. claim
+        (default 'harmful') is what they assert about message_id:
+        'harmful' = the model missed this; 'safe' = the model flagged this
+        wrongly (a false-positive dispute). Either way it's extra context
+        framed as a strong signal to weigh, not an automatic override --
+        and since every message is already visible to the LLM (see module
+        docstring), no forced-inclusion mechanism is needed. `reason` is
+        free user text embedded in the prompt -- same category of exposure
+        as any other message's text above, not a new one.
     confirmed_examples: optional list of dicts {text, reason, label} --
         past user-reported messages (from any conversation) whose reports
-        this same stage subsequently confirmed as harmful. Included as
-        reference patterns so a confirmed miss generalizes to similar
-        messages everywhere immediately, without waiting for a retrain.
-        Framed as reference only -- resemblance is something to weigh, not
-        an automatic match. Both `text` and `reason` are user-authored free
+        this same stage subsequently confirmed. label 'safe' means a
+        confirmed false positive (flagged, disputed, agreed harmless);
+        any other label means confirmed harmful. Included as reference
+        patterns so a confirmed correction generalizes to similar messages
+        everywhere immediately, without waiting for a retrain. Framed as
+        reference only -- resemblance is something to weigh, not an
+        automatic match. Both `text` and `reason` are user-authored free
         text, same exposure category as the message lines above.
     """
     message_lines = [
@@ -93,21 +97,54 @@ def build_prompt(conversation_id, messages, conversation_score, user_report=None
 
     examples_section = ""
     if confirmed_examples:
-        example_lines = [
-            f'  - label={e["label"]}, reporter said "{e["reason"]}": "{e["text"]}"'
-            for e in confirmed_examples
-        ]
-        examples_section = f"""
+        harmful_examples = [e for e in confirmed_examples if e["label"] != "safe"]
+        safe_examples = [e for e in confirmed_examples if e["label"] == "safe"]
+
+        if harmful_examples:
+            harmful_lines = [
+                f'  - label={e["label"]}, reporter said "{e["reason"]}": "{e["text"]}"'
+                for e in harmful_examples
+            ]
+            examples_section += f"""
 
 Known harmful patterns, previously reported by users and confirmed on
 review (from other conversations -- reference patterns, not part of this
 conversation). If any message above resembles one of these, weigh that
 resemblance in your judgment; do not flag on resemblance alone if the
 actual context here doesn't support it:
-{chr(10).join(example_lines)}"""
+{chr(10).join(harmful_lines)}"""
+
+        if safe_examples:
+            safe_lines = [
+                f'  - reporter said "{e["reason"]}": "{e["text"]}"'
+                for e in safe_examples
+            ]
+            examples_section += f"""
+
+Known FALSE-POSITIVE patterns: messages the classifier flagged that were
+disputed by a conversation member and confirmed harmless on review (also
+from other conversations). If any message above resembles one of these
+ordinary patterns, lean away from flagging it on the classifier's score
+alone -- but harmful context still wins over resemblance to these:
+{chr(10).join(safe_lines)}"""
 
     report_section = ""
-    if user_report is not None:
+    if user_report is not None and user_report.get("claim", "harmful") == "safe":
+        report_section = f"""
+
+A member of this conversation has DISPUTED the flag on message
+id={user_report["message_id"]} as a false positive, giving this reason:
+"{user_report["reason"]}"
+
+Weigh this dispute as a meaningful human signal alongside your own reading
+of the messages above -- a person in the conversation believes this was
+flagged wrongly, so you may conclude "safe" even if the classifier's scores
+are high. Do not rubber-stamp it either: conclude "safe" only if the
+disputed message and its context genuinely read as harmless. If you conclude
+"harmful" despite this dispute, use gentle_alert_text to briefly and kindly
+explain why the flag stands -- the disputer will read it as the outcome of
+their feedback, so address their stated reason, not just the score."""
+    elif user_report is not None:
         report_section = f"""
 
 A member of this conversation has REPORTED message id={user_report["message_id"]}

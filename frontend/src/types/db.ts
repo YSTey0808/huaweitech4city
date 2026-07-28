@@ -76,13 +76,16 @@ export interface ConversationScore {
 // conversation's other member never sees who reported what.
 // status lifecycle (migration 009, stamped by the backend after the
 // report-triggered re-scoring): pending -> confirmed | dismissed.
-// `status` stays an open-ended string per this file's convention.
+// claim (migration 010) is the report's direction: 'harmful' = the model
+// missed this; 'safe' = false-positive dispute of an existing flag.
+// `status`/`claim` stay open-ended strings per this file's convention.
 export interface MessageReport {
   id: string;
   msg_id: string;
   conversation_id: string;
   reporter_id: string;
   reason: string;
+  claim: string;
   status: string;
   outcome_reasoning: string | null;
   resolved_at: string | null;

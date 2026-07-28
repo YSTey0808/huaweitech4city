@@ -28,4 +28,5 @@ async def report(request: Request, body: ReportRequest, x_backend_secret: str = 
         model=request.app.state.model,
         embedding_store=request.app.state.embedding_store,
         model_version=request.app.state.model_version,
+        claim=body.claim,
     )

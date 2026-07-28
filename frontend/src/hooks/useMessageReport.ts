@@ -3,16 +3,21 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import type { MessageReport } from '../types/db'
 
+export type ReportClaim = 'harmful' | 'safe'
+
 export interface ReportOutcome {
   status: string // 'pending' | 'confirmed' | 'dismissed' (open-ended, see types/db.ts)
+  claim: string // 'harmful' (model missed this) | 'safe' (false-positive dispute)
   outcomeReasoning: string | null
 }
 
 // Fire-and-forget re-scoring trigger, same shape as useMessages.ts's
 // requestScoring — must never block or fail the "reported" UX.
-function requestReportRescoring(conversationId: string, msgId: string, reason: string) {
+function requestReportRescoring(conversationId: string, msgId: string, reason: string, claim: ReportClaim) {
   void supabase.functions
-    .invoke('report-message', { body: { conversation_id: conversationId, msg_id: msgId, reason } })
+    .invoke('report-message', {
+      body: { conversation_id: conversationId, msg_id: msgId, reason, claim },
+    })
     .then(({ error }) => {
       if (error) console.warn('report-message failed:', error.message)
     })
@@ -53,6 +58,7 @@ export function useMessageReport(conversationId: string | undefined) {
       if (!cancelled) {
         upsertOutcome(row.msg_id, {
           status: row.status,
+          claim: row.claim,
           outcomeReasoning: row.outcome_reasoning,
         })
       }
@@ -86,7 +92,7 @@ export function useMessageReport(conversationId: string | undefined) {
 
     supabase
       .from('message_reports')
-      .select('msg_id, status, outcome_reasoning')
+      .select('msg_id, status, claim, outcome_reasoning')
       .eq('conversation_id', conversationId)
       .then(({ data, error }) => {
         if (cancelled) return
@@ -97,6 +103,7 @@ export function useMessageReport(conversationId: string | undefined) {
         for (const row of data) {
           upsertOutcome(row.msg_id as string, {
             status: row.status as string,
+            claim: row.claim as string,
             outcomeReasoning: row.outcome_reasoning as string | null,
           })
         }
@@ -109,14 +116,20 @@ export function useMessageReport(conversationId: string | undefined) {
   }, [conversationId, upsertOutcome])
 
   const report = useCallback(
-    async (msgId: string, reason: string): Promise<boolean> => {
+    async (msgId: string, reason: string, claim: ReportClaim = 'harmful'): Promise<boolean> => {
       if (!conversationId || !user) return false
       const trimmed = reason.trim()
       if (!trimmed) return false
 
       const { error: insertErr } = await supabase
         .from('message_reports')
-        .insert({ msg_id: msgId, conversation_id: conversationId, reporter_id: user.id, reason: trimmed })
+        .insert({
+          msg_id: msgId,
+          conversation_id: conversationId,
+          reporter_id: user.id,
+          reason: trimmed,
+          claim,
+        })
 
       // 23505 = already reported this message (unique(msg_id, reporter_id))
       // -- treat as success, matching useMessages.ts's insert-retry handling.
@@ -127,8 +140,8 @@ export function useMessageReport(conversationId: string | undefined) {
 
       // Optimistic 'pending'; the Realtime echo (and later the backend's
       // outcome UPDATE) converge through the same upsert.
-      upsertOutcome(msgId, { status: 'pending', outcomeReasoning: null })
-      requestReportRescoring(conversationId, msgId, trimmed)
+      upsertOutcome(msgId, { status: 'pending', claim, outcomeReasoning: null })
+      requestReportRescoring(conversationId, msgId, trimmed, claim)
       return true
     },
     [conversationId, user, upsertOutcome],

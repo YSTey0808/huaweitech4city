@@ -40,6 +40,10 @@ class FakeQuery:
         self._payload = payload
         return self
 
+    def delete(self):
+        self._op = "delete"
+        return self
+
     def eq(self, col, val):
         self._eq[col] = val
         return self
@@ -96,6 +100,12 @@ class FakeQuery:
             matched = [r for r in self._rows if self._matches(r)]
             for r in matched:
                 r.update(self._payload)
+            return SimpleNamespace(data=matched)
+
+        if self._op == "delete":
+            matched = [r for r in self._rows if self._matches(r)]
+            for r in matched:
+                self._rows.remove(r)
             return SimpleNamespace(data=matched)
 
         raise AssertionError("FakeQuery.execute() called with no operation set")
