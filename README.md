@@ -9,7 +9,7 @@ This repo is a monorepo with three clearly separated pieces:
 | [`frontend/`](frontend/) | The chat UI — React + Vite + TypeScript. Talks to Supabase directly for auth/messages/Realtime. | [docs/frontend.md](docs/frontend.md) |
 | [`backend/`](backend/) | A thin FastAPI service — HTTP interface + Supabase I/O + contract translation. Owns no model logic. | [docs/backend.md](docs/backend.md) |
 | [`pipeline/`](pipeline/) | The recognition engine — preprocess → embed → graph → GNN → LLM reasoning. No HTTP or Supabase knowledge. | [docs/pipeline.md](docs/pipeline.md) |
-| [`supabase/`](supabase/) | Shared infra — DB schema (migrations) + the one proxy Edge Function both sides touch. | [docs/frontend.md](docs/frontend.md#supabase-setup) |
+| [`supabase/`](supabase/) | Shared infra — DB schema (migrations) + the proxy Edge Functions (`score-message`, `report-message`) both sides touch. | [docs/frontend.md](docs/frontend.md#supabase-setup) |
 
 If you only remember one rule: **`frontend/` is the UI, `backend/` is the API server, `pipeline/` is the model.** Everything else follows from that.
 
@@ -55,7 +55,7 @@ Send a message containing known-harmful phrasing (see `pipeline/dataset/` once p
 
 - **[docs/architecture.md](docs/architecture.md)** — system diagrams, component responsibilities, call chain, graph storage & lifecycle.
 - **[docs/frontend.md](docs/frontend.md)** — UI structure, Realtime contract, env vars, Supabase setup, Vercel deploy.
-- **[docs/backend.md](docs/backend.md)** — `POST /score` API contract, env vars, local run, Docker, Render deployment.
+- **[docs/backend.md](docs/backend.md)** — `POST /score` + `POST /report` API contracts, the human-feedback loop (reports, watchlist, escalation), env vars, local run, Docker, Render deployment.
 - **[docs/pipeline.md](docs/pipeline.md)** — GNN + LLM architecture, design rationale, known limitations.
 - **[docs/preprocessing.md](docs/preprocessing.md)** — message-text normalization spec.
 - **[docs/data_schema.md](docs/data_schema.md)** — canonical dataset schema, task definition, known schema issues (live vs. training field-name drift).
