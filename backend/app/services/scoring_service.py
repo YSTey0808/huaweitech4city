@@ -8,6 +8,7 @@ backed by the real model.
 """
 
 from .message_mapper import supabase_row_to_pipeline_message
+from .watchlist_service import SupabaseWatchlist
 
 WINDOW_SIZE = 10
 
@@ -137,5 +138,10 @@ def score_conversation_request(
     from inference import score_conversation  # pipeline/, on sys.path -- see app/main.py
 
     messages = embedding_store.get_or_compute(messages, embed_model, model_version)
-    result = score_conversation(conversation_id, messages, model)
+    # Confirmed past reports ride along as reference patterns on every call
+    # (see watchlist_service.py) -- the human-feedback loop's reach beyond
+    # the one conversation a report was filed in.
+    confirmed_examples = SupabaseWatchlist(supabase).get_confirmed_examples()
+    result = score_conversation(conversation_id, messages, model,
+                                 confirmed_examples=confirmed_examples)
     return write_scores(supabase, conversation_id, result)

@@ -73,12 +73,14 @@ def stub_build_message_graph(monkeypatch):
 def llm_spy(monkeypatch):
     calls = []
 
-    def fake_run_llm_reasoning(conversation_id, messages, conversation_score, user_report=None):
+    def fake_run_llm_reasoning(conversation_id, messages, conversation_score, user_report=None,
+                               confirmed_examples=None):
         calls.append({
             "conversation_id": conversation_id,
             "messages": messages,
             "conversation_score": conversation_score,
             "user_report": user_report,
+            "confirmed_examples": confirmed_examples,
         })
         return json.dumps({
             "conversation_label": "harmful",
@@ -117,6 +119,16 @@ def test_score_conversation_forwards_user_report_to_llm(llm_spy):
     assert len(llm_spy) == 1
     assert llm_spy[0]["user_report"] == user_report
     assert result["conversation_label"] == "harmful"
+
+
+def test_score_conversation_forwards_confirmed_examples_to_llm(llm_spy):
+    messages = make_messages(3)
+    model = FakeModel(conv_score=0.5, per_message_scores=[0.5, 0.5, 0.5])
+    examples = [{"text": "send otp now", "reason": "otp scam", "label": "scam"}]
+
+    inference.score_conversation("conv1", messages, model, confirmed_examples=examples)
+
+    assert llm_spy[0]["confirmed_examples"] == examples
 
 
 def test_score_conversation_reported_message_reaches_llm_even_with_lowest_score(llm_spy):

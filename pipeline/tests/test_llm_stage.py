@@ -52,6 +52,34 @@ def test_build_prompt_report_tells_llm_not_to_rubber_stamp():
     assert "Do not rubber-stamp it either" in normalized
 
 
+def test_build_prompt_without_examples_has_no_examples_section():
+    prompt = llm_stage.build_prompt("conv1", EVIDENCE, 0.75)
+    assert "Known harmful patterns" not in prompt
+
+
+def test_build_prompt_with_confirmed_examples_includes_them():
+    examples = [
+        {"text": "send otp now", "reason": "asked for my otp", "label": "scam"},
+        {"text": "nobody likes you", "reason": "bullying my kid", "label": "cyberbullying"},
+    ]
+    prompt = llm_stage.build_prompt("conv1", EVIDENCE, 0.75, confirmed_examples=examples)
+    assert "Known harmful patterns" in prompt
+    assert 'label=scam, reporter said "asked for my otp": "send otp now"' in prompt
+    assert 'label=cyberbullying, reporter said "bullying my kid": "nobody likes you"' in prompt
+    # Reference patterns must come after the conversation's own messages and
+    # before the output spec.
+    assert prompt.index("ok sure") < prompt.index("Known harmful patterns") < prompt.index("Respond with ONLY")
+
+
+def test_build_prompt_examples_and_report_can_coexist():
+    examples = [{"text": "send otp now", "reason": "otp scam", "label": "scam"}]
+    user_report = {"message_id": "m2", "reason": "same pattern happening to me"}
+    prompt = llm_stage.build_prompt("conv1", EVIDENCE, 0.05,
+                                    user_report=user_report, confirmed_examples=examples)
+    assert "Known harmful patterns" in prompt
+    assert "REPORTED message id=m2" in prompt
+
+
 class _FakeMessage:
     def __init__(self, text):
         self.content = [type("Block", (), {"text": text})()]

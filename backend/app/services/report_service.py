@@ -27,6 +27,7 @@ backend must not trust a caller-supplied pairing.
 """
 
 from .scoring_service import fetch_message_window, write_scores
+from .watchlist_service import SupabaseWatchlist
 
 
 def report_message_request(
@@ -47,8 +48,14 @@ def report_message_request(
     from inference import score_conversation  # pipeline/, on sys.path -- see app/main.py
 
     messages = embedding_store.get_or_compute(messages, embed_model, model_version)
+    # Past confirmed reports as reference patterns, same as the automatic
+    # path. The report being processed right now is not yet confirmed (its
+    # score rows don't exist until write_scores below), so it can't appear
+    # in its own examples list.
+    confirmed_examples = SupabaseWatchlist(supabase).get_confirmed_examples()
     result = score_conversation(
         conversation_id, messages, model,
         user_report={"message_id": msg_id, "reason": reason},
+        confirmed_examples=confirmed_examples,
     )
     return write_scores(supabase, conversation_id, result, source="user_report")

@@ -79,7 +79,7 @@ def rank_messages(messages: list, per_message_scores: torch.Tensor) -> list:
 
 @torch.no_grad()
 def score_conversation(conversation_id: str, messages: list, model: MessageGraphSAGE,
-                        user_report: dict = None) -> dict:
+                        user_report: dict = None, confirmed_examples: list = None) -> dict:
     """
     messages: chronological, already embedded (see module docstring).
     model: a loaded MessageGraphSAGE in eval mode (caller loads this once
@@ -91,6 +91,11 @@ def score_conversation(conversation_id: str, messages: list, model: MessageGraph
         it) and already guaranteed visible to the LLM (rank_messages filters
         nothing) -- user_report only needs to reach run_llm_reasoning so the
         LLM knows to weigh it.
+    confirmed_examples: optional list of {text, reason, label} dicts --
+        past reported-and-confirmed harmful messages from any conversation,
+        passed straight through to the LLM prompt as reference patterns
+        (see gnn/llm_stage.py). Fetched by the caller (backend's
+        watchlist_service) -- this module stays storage-agnostic.
 
     Returns the LLM stage's structured verdict -- the LLM's own judgment,
     not a passthrough of the GNN's label (see gnn/llm_stage.py):
@@ -112,5 +117,6 @@ def score_conversation(conversation_id: str, messages: list, model: MessageGraph
     conv_score, per_message_scores = model.forward_full(graph)
 
     ranked = rank_messages(messages, per_message_scores)
-    raw_json = run_llm_reasoning(conversation_id, ranked, conv_score.item(), user_report=user_report)
+    raw_json = run_llm_reasoning(conversation_id, ranked, conv_score.item(),
+                                 user_report=user_report, confirmed_examples=confirmed_examples)
     return _parse_llm_json(raw_json)

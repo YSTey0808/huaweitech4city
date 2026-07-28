@@ -55,13 +55,25 @@ def test_report_message_request_happy_path(fake_supabase, monkeypatch):
     fake_supabase.store["messages"] = [
         {"id": "m1", "conversation_id": "c1", "sender_id": "u1", "content": "hi",
          "reply_to": None, "created_at": "2026-07-22T00:00:00+00:00"},
+        # A previously reported-and-confirmed message from another
+        # conversation -- should ride along as a watchlist example.
+        {"id": "m0", "conversation_id": "OTHER", "sender_id": "u9", "content": "send otp now",
+         "reply_to": None, "created_at": "2026-07-21T00:00:00+00:00"},
+    ]
+    fake_supabase.store["message_reports"] = [
+        {"msg_id": "m0", "reason": "asked for my otp", "created_at": "2026-07-21T01:00:00+00:00"},
+    ]
+    fake_supabase.store["message_scores"] = [
+        {"msg_id": "m0", "label": "scam", "source": "user_report"},
     ]
     captured = {}
 
-    def fake_score_conversation(conversation_id, messages, model, user_report=None):
+    def fake_score_conversation(conversation_id, messages, model, user_report=None,
+                                confirmed_examples=None):
         captured["conversation_id"] = conversation_id
         captured["messages"] = messages
         captured["user_report"] = user_report
+        captured["confirmed_examples"] = confirmed_examples
         return {
             "conversation_label": "harmful",
             "conversation_confidence": 0.8,
@@ -80,6 +92,11 @@ def test_report_message_request_happy_path(fake_supabase, monkeypatch):
     assert captured["conversation_id"] == "c1"
     assert captured["user_report"] == {"message_id": "m1", "reason": "this looks like a scam"}
     assert captured["messages"][0]["embedding"] == "fake-embedding"  # embedding_store was applied
+    assert captured["confirmed_examples"] == [
+        {"text": "send otp now", "reason": "asked for my otp", "label": "scam"}
+    ]
 
     assert out["conversation_scores"] == "inserted"
+    # conversation_scores store now also holds the pre-seeded message_scores row's
+    # sibling insert -- check the conversation-level row specifically.
     assert fake_supabase.store["conversation_scores"][0]["source"] == "user_report"

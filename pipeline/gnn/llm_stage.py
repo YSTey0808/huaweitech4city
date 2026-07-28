@@ -22,6 +22,15 @@ mechanism for free: since every message is already in view, a report never
 needs to force anything into visibility -- it only adds one conversation
 member's stated belief about a specific message as extra context for the
 LLM's own judgment.
+
+Confirmed past reports (confirmed_examples, see build_prompt) are the
+generalizing half of that feedback loop before any retrain happens: messages
+from OTHER conversations that a user reported and this stage then agreed
+were harmful. They ride along as few-shot reference patterns in every
+prompt, so a pattern confirmed once can inform the judgment on unrelated
+conversations immediately -- the GNN's weights only learn it at the next
+retrain (see docs). The caller supplies them as plain dicts; this module
+stays free of any storage/Supabase knowledge.
 """
 
 import os
@@ -49,7 +58,8 @@ def _get_client() -> Anthropic:
     return _client
 
 
-def build_prompt(conversation_id, messages, conversation_score, user_report=None):
+def build_prompt(conversation_id, messages, conversation_score, user_report=None,
+                 confirmed_examples=None):
     """
     messages: every message in the scoring window (not a GNN-filtered
         subset), each a dict {message_id, text, sender_id, score}. score is
@@ -67,11 +77,34 @@ def build_prompt(conversation_id, messages, conversation_score, user_report=None
         strong signal to weigh, not an automatic override. `reason` is free
         user text embedded in the prompt -- same category of exposure as any
         other message's text above, not a new one.
+    confirmed_examples: optional list of dicts {text, reason, label} --
+        past user-reported messages (from any conversation) whose reports
+        this same stage subsequently confirmed as harmful. Included as
+        reference patterns so a confirmed miss generalizes to similar
+        messages everywhere immediately, without waiting for a retrain.
+        Framed as reference only -- resemblance is something to weigh, not
+        an automatic match. Both `text` and `reason` are user-authored free
+        text, same exposure category as the message lines above.
     """
     message_lines = [
         f'  - id={m["message_id"]}, sender={m["sender_id"]}, model_score={m["score"]:.2f}: "{m["text"]}"'
         for m in messages
     ]
+
+    examples_section = ""
+    if confirmed_examples:
+        example_lines = [
+            f'  - label={e["label"]}, reporter said "{e["reason"]}": "{e["text"]}"'
+            for e in confirmed_examples
+        ]
+        examples_section = f"""
+
+Known harmful patterns, previously reported by users and confirmed on
+review (from other conversations -- reference patterns, not part of this
+conversation). If any message above resembles one of these, weigh that
+resemblance in your judgment; do not flag on resemblance alone if the
+actual context here doesn't support it:
+{chr(10).join(example_lines)}"""
 
     report_section = ""
     if user_report is not None:
@@ -114,7 +147,7 @@ All messages in this conversation's scoring window, with the classifier's
 per-message contribution score (higher = the classifier attributes more
 responsibility to that message for the score above -- not an independent
 probability that this message alone is harmful):
-{chr(10).join(message_lines)}{report_section}
+{chr(10).join(message_lines)}{examples_section}{report_section}
 
 Respond with ONLY a JSON object in this exact shape:
 {{
@@ -148,8 +181,10 @@ def _extract_json(text: str) -> str:
     return text[start : end + 1]
 
 
-def run_llm_reasoning(conversation_id, evidence_messages, conversation_score, user_report=None):
-    prompt = build_prompt(conversation_id, evidence_messages, conversation_score, user_report=user_report)
+def run_llm_reasoning(conversation_id, evidence_messages, conversation_score, user_report=None,
+                      confirmed_examples=None):
+    prompt = build_prompt(conversation_id, evidence_messages, conversation_score,
+                          user_report=user_report, confirmed_examples=confirmed_examples)
     client = _get_client()
 
     response = client.messages.create(
