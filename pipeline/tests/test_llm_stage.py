@@ -52,6 +52,16 @@ def test_build_prompt_report_tells_llm_not_to_rubber_stamp():
     assert "Do not rubber-stamp it either" in normalized
 
 
+def test_build_prompt_report_asks_for_dismissal_reasoning():
+    # The backend stores gentle_alert_text as the report's outcome_reasoning
+    # on dismissal (see backend report_service) -- the prompt must actually
+    # ask for a reporter-addressed explanation or that field is generic.
+    user_report = {"message_id": "m2", "reason": "scam"}
+    prompt = llm_stage.build_prompt("conv1", EVIDENCE, 0.05, user_report=user_report)
+    normalized = " ".join(prompt.split())
+    assert 'If you conclude "safe" despite this report' in normalized
+
+
 def test_build_prompt_without_examples_has_no_examples_section():
     prompt = llm_stage.build_prompt("conv1", EVIDENCE, 0.75)
     assert "Known harmful patterns" not in prompt

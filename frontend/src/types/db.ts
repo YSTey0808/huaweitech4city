@@ -74,11 +74,17 @@ export interface ConversationScore {
 // A user-filed report that a message the model didn't flag is actually
 // harmful. RLS restricts rows to the reporter (see migration 008) -- a
 // conversation's other member never sees who reported what.
+// status lifecycle (migration 009, stamped by the backend after the
+// report-triggered re-scoring): pending -> confirmed | dismissed.
+// `status` stays an open-ended string per this file's convention.
 export interface MessageReport {
   id: string;
   msg_id: string;
   conversation_id: string;
   reporter_id: string;
   reason: string;
+  status: string;
+  outcome_reasoning: string | null;
+  resolved_at: string | null;
   created_at: string;
 }

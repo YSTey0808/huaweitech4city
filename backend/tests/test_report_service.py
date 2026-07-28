@@ -62,6 +62,10 @@ def test_report_message_request_happy_path(fake_supabase, monkeypatch):
     ]
     fake_supabase.store["message_reports"] = [
         {"msg_id": "m0", "reason": "asked for my otp", "created_at": "2026-07-21T01:00:00+00:00"},
+        # The report being processed by this request (frontend inserted it
+        # before invoking the Edge Function) -- must get stamped 'confirmed'.
+        {"msg_id": "m1", "conversation_id": "c1", "reason": "this looks like a scam",
+         "status": "pending", "created_at": "2026-07-22T00:01:00+00:00"},
     ]
     fake_supabase.store["message_scores"] = [
         {"msg_id": "m0", "label": "scam", "source": "user_report"},
@@ -100,3 +104,53 @@ def test_report_message_request_happy_path(fake_supabase, monkeypatch):
     # conversation_scores store now also holds the pre-seeded message_scores row's
     # sibling insert -- check the conversation-level row specifically.
     assert fake_supabase.store["conversation_scores"][0]["source"] == "user_report"
+
+    # The report row got its outcome stamped (migration 009).
+    assert out["report_status"] == "confirmed"
+    stamped = next(r for r in fake_supabase.store["message_reports"] if r["msg_id"] == "m1")
+    assert stamped["status"] == "confirmed"
+    assert stamped["outcome_reasoning"] == "flagged"
+    assert stamped["resolved_at"] is not None
+    # The unrelated watchlist-source report (other conversation) is untouched.
+    other = next(r for r in fake_supabase.store["message_reports"] if r["msg_id"] == "m0")
+    assert other.get("status") != "confirmed"
+
+
+def test_report_message_request_dismissal_stamps_report_and_writes_no_scores(fake_supabase, monkeypatch):
+    fake_supabase.store["messages"] = [
+        {"id": "m1", "conversation_id": "c1", "sender_id": "u1", "content": "see you at 7",
+         "reply_to": None, "created_at": "2026-07-22T00:00:00+00:00"},
+    ]
+    fake_supabase.store["message_reports"] = [
+        {"msg_id": "m1", "conversation_id": "c1", "reason": "im sure this is bad",
+         "status": "pending", "created_at": "2026-07-22T00:01:00+00:00"},
+    ]
+
+    def fake_score_conversation(conversation_id, messages, model, user_report=None,
+                                confirmed_examples=None):
+        # The LLM disagrees with the report.
+        return {
+            "conversation_label": "safe",
+            "conversation_confidence": 0.9,
+            "severity": None,
+            "gentle_alert_text": "This message is an ordinary plan to meet; nothing suggests harm.",
+            "top_evidence_messages": [],
+        }
+
+    _install_fake_inference(monkeypatch, fake_score_conversation)
+
+    out = report_message_request(
+        "c1", "m1", "im sure this is bad", fake_supabase,
+        embed_model=None, model="fake-model", embedding_store=FakeEmbeddingStore(), model_version="v1",
+    )
+
+    # Absence-of-rows = safe convention holds: nothing written to scores.
+    assert out["conversation_scores"] == "safe"
+    assert fake_supabase.store.get("conversation_scores", []) == []
+
+    # But the report itself is stamped dismissed, with the LLM's explanation.
+    assert out["report_status"] == "dismissed"
+    stamped = fake_supabase.store["message_reports"][0]
+    assert stamped["status"] == "dismissed"
+    assert "ordinary plan to meet" in stamped["outcome_reasoning"]
+    assert stamped["resolved_at"] is not None

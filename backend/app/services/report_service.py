@@ -19,15 +19,42 @@ with three deliberate differences:
      report-triggered findings stay distinguishable -- the audit trail.
 
 The message_reports row itself is inserted by the frontend directly
-(RLS-guarded), not here -- this service only runs the re-scoring. The
-Edge Function has already verified the caller's membership before this
-is reached, but msg_id is still re-checked against conversation_id below
+(RLS-guarded), not here -- this service only runs the re-scoring, then
+stamps the report row's outcome (status / outcome_reasoning / resolved_at,
+see migration 009) so the reporter's client can stream the verdict over
+Realtime instead of a dismissal vanishing into silence. The Edge Function
+has already verified the caller's membership before this is reached, but
+msg_id is still re-checked against conversation_id below
 (fetch_message_window returns [] on a mismatched anchor) since the
 backend must not trust a caller-supplied pairing.
 """
 
-from .scoring_service import fetch_message_window, write_scores
+from datetime import datetime, timezone
+
+from .scoring_service import SAFE_LABEL, fetch_message_window, write_scores
 from .watchlist_service import SupabaseWatchlist
+
+
+def _record_report_outcome(supabase, conversation_id: str, msg_id: str, result: dict) -> str:
+    """Stamps the report row(s) for msg_id with the LLM's verdict. Keyed by
+    (conversation_id, msg_id), not reporter -- if several members reported
+    the same message, they all get the same outcome. Failure-isolated like
+    the watchlist fetch: scores were already written, so a failed stamp
+    must not fail the request (the report just stays 'pending' and the UI
+    keeps showing "awaiting review")."""
+    status = "dismissed" if result["conversation_label"] == SAFE_LABEL else "confirmed"
+    try:
+        supabase.table("message_reports").update({
+            "status": status,
+            # On dismissal the prompt asks the LLM to address the reporter's
+            # stated reason in gentle_alert_text (see gnn/llm_stage.py) --
+            # that same sentence doubles as the outcome explanation here.
+            "outcome_reasoning": result.get("gentle_alert_text"),
+            "resolved_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("conversation_id", conversation_id).eq("msg_id", msg_id).execute()
+    except Exception as e:
+        print(f"recording report outcome failed (report stays pending): {e}")
+    return status
 
 
 def report_message_request(
@@ -58,4 +85,6 @@ def report_message_request(
         user_report={"message_id": msg_id, "reason": reason},
         confirmed_examples=confirmed_examples,
     )
-    return write_scores(supabase, conversation_id, result, source="user_report")
+    out = write_scores(supabase, conversation_id, result, source="user_report")
+    out["report_status"] = _record_report_outcome(supabase, conversation_id, msg_id, result)
+    return out

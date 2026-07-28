@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase'
 import { useMessages } from '../hooks/useMessages'
 import type { ChatMessage } from '../hooks/useMessages'
 import { useMessageReport } from '../hooks/useMessageReport'
+import type { ReportOutcome } from '../hooks/useMessageReport'
 import { useScores } from '../hooks/useScores'
 import AlertPanel from './AlertPanel'
 import Avatar from './Avatar'
@@ -27,7 +28,7 @@ function MessageBubble({
   scores,
   isEvidence,
   isTarget,
-  reported,
+  reportOutcome,
   reportOpen,
   onToggleReport,
   onSubmitReport,
@@ -38,12 +39,13 @@ function MessageBubble({
   scores?: MessageScore[]
   isEvidence?: boolean
   isTarget?: boolean
-  reported: boolean
+  reportOutcome?: ReportOutcome // present iff this user reported this message
   reportOpen: boolean
   onToggleReport: () => void
-  onSubmitReport: (reason: string) => void
+  onSubmitReport: (reason: string) => Promise<boolean>
 }) {
   const [reason, setReason] = useState('')
+  const [submitState, setSubmitState] = useState<'idle' | 'submitting' | 'failed'>('idle')
   // Directly flagged (red) beats evidence-of-conversation-score (amber).
   const flagged = scores !== undefined && scores.length > 0
   const highlight = flagged ? 'ring-2 ring-red-400' : isEvidence ? 'ring-2 ring-amber-400' : ''
@@ -93,12 +95,29 @@ function MessageBubble({
         {/* Reporting a message you sent yourself doesn't fit "flag harm from
             someone else" in a 2-party DM, so this is only offered on the
             other person's messages. Already-flagged messages hide the
-            action entirely (nothing left to catch) -- except the "Reported"
-            confirmation itself, which stays visible even if this user's own
-            report is what caused the flag. */}
+            action entirely (nothing left to catch) -- except the report
+            outcome line itself, which stays visible even if this user's own
+            report is what caused the flag. Outcome states (migration 009):
+            pending = re-scoring still running; confirmed = LLM agreed (the
+            flag UI above shows the result); dismissed = LLM reviewed and
+            disagreed, with its reasoning shown so the report doesn't vanish
+            into silence. */}
         {!own &&
-          (reported ? (
-            <p className="mt-1 text-[11px] text-slate-400">Reported — thanks</p>
+          (reportOutcome ? (
+            <div className="mt-1 text-[11px] text-slate-400">
+              {reportOutcome.status === 'pending' ? (
+                <p>Reported — awaiting review</p>
+              ) : reportOutcome.status === 'confirmed' ? (
+                <p className="text-red-600">Reported — confirmed and flagged</p>
+              ) : (
+                <>
+                  <p>Reported — reviewed, not flagged</p>
+                  {reportOutcome.outcomeReasoning && (
+                    <p className="mt-0.5 italic text-slate-500">{reportOutcome.outcomeReasoning}</p>
+                  )}
+                </>
+              )}
+            </div>
           ) : flagged ? null : reportOpen ? (
             <div className="mt-1 space-y-1">
               <textarea
@@ -111,15 +130,23 @@ function MessageBubble({
               />
               <div className="flex gap-2">
                 <button
-                  onClick={() => {
-                    if (!reason.trim()) return
-                    onSubmitReport(reason)
-                    setReason('')
+                  onClick={async () => {
+                    if (!reason.trim() || submitState === 'submitting') return
+                    setSubmitState('submitting')
+                    // Only clear the typed reason on success -- on failure it
+                    // stays put so the user can retry without retyping.
+                    const ok = await onSubmitReport(reason)
+                    if (ok) {
+                      setReason('')
+                      setSubmitState('idle')
+                    } else {
+                      setSubmitState('failed')
+                    }
                   }}
-                  disabled={!reason.trim()}
+                  disabled={!reason.trim() || submitState === 'submitting'}
                   className="rounded bg-red-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-red-700 disabled:opacity-50"
                 >
-                  Submit
+                  {submitState === 'submitting' ? 'Submitting…' : 'Submit'}
                 </button>
                 <button
                   onClick={onToggleReport}
@@ -128,6 +155,11 @@ function MessageBubble({
                   Cancel
                 </button>
               </div>
+              {submitState === 'failed' && (
+                <p className="text-[11px] text-red-600">
+                  Couldn't submit the report. Please try again.
+                </p>
+              )}
             </div>
           ) : (
             <button
@@ -152,7 +184,7 @@ export default function ChatPane({ conversationId, friend }: ChatPaneProps) {
     loading: scoresLoading,
     error: scoresError,
   } = useScores(conversationId)
-  const { reportedIds, report } = useMessageReport(conversationId)
+  const { reports, report } = useMessageReport(conversationId)
   const [draft, setDraft] = useState('')
   const [alertsOpen, setAlertsOpen] = useState(false)
   // Which message's inline report form is open -- only one at a time.
@@ -263,12 +295,13 @@ export default function ChatPane({ conversationId, friend }: ChatPaneProps) {
                 scores={messageScores.get(m.id)}
                 isEvidence={evidenceIds.has(m.id)}
                 isTarget={m.id === flashId}
-                reported={reportedIds.has(m.id)}
+                reportOutcome={reports.get(m.id)}
                 reportOpen={reportingId === m.id}
                 onToggleReport={() => setReportingId((id) => (id === m.id ? null : m.id))}
                 onSubmitReport={async (reason) => {
                   const ok = await report(m.id, reason)
                   if (ok) setReportingId(null)
+                  return ok
                 }}
               />
             ))

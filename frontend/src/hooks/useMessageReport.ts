@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import type { MessageReport } from '../types/db'
+
+export interface ReportOutcome {
+  status: string // 'pending' | 'confirmed' | 'dismissed' (open-ended, see types/db.ts)
+  outcomeReasoning: string | null
+}
 
 // Fire-and-forget re-scoring trigger, same shape as useMessages.ts's
 // requestScoring — must never block or fail the "reported" UX.
@@ -13,24 +19,74 @@ function requestReportRescoring(conversationId: string, msgId: string, reason: s
     .catch((e) => console.warn('report-message failed:', e))
 }
 
-// Lets a user flag a message the model missed. Tracks which messages the
-// current user has already reported in this conversation -- backed by the
-// database (not just local state), so the "already reported" state survives
-// a refresh instead of resetting every session.
+// Lets a user flag a message the model missed, and tracks each report's
+// outcome (pending -> confirmed/dismissed, stamped by the backend after the
+// LLM reviews it -- see migration 009). State is DB-backed and streamed:
+// the initial fetch survives a refresh, and the Realtime subscription
+// delivers the verdict live a few seconds after submitting. Unlike
+// message_scores, message_reports has a conversation_id column, so the
+// subscription is server-side filtered (no unfiltered-stream workaround
+// needed); RLS additionally scopes rows to the reporter's own.
 export function useMessageReport(conversationId: string | undefined) {
   const { user } = useAuth()
-  const [reportedIds, setReportedIds] = useState<Set<string>>(new Set())
+  const [reports, setReports] = useState<Map<string, ReportOutcome>>(new Map())
+
+  const upsertOutcome = useCallback((msgId: string, outcome: ReportOutcome) => {
+    setReports((prev) => {
+      // A resolved outcome never regresses to 'pending' (same idea as
+      // useMessages' sent-never-regresses-to-sending guard): the initial
+      // fetch can resolve AFTER a fresher Realtime UPDATE already landed,
+      // and the optimistic 'pending' from report() must not clobber an
+      // already-known verdict either.
+      const existing = prev.get(msgId)
+      if (existing && existing.status !== 'pending' && outcome.status === 'pending') return prev
+      return new Map(prev).set(msgId, outcome)
+    })
+  }, [])
 
   useEffect(() => {
     if (!conversationId) return
     let cancelled = false
-    setReportedIds(new Set())
+    setReports(new Map())
 
-    // RLS already restricts this to the current user's own reports (see
-    // migration 008), so no reporter_id filter is needed client-side.
+    const applyRow = (row: MessageReport) => {
+      if (!cancelled) {
+        upsertOutcome(row.msg_id, {
+          status: row.status,
+          outcomeReasoning: row.outcome_reasoning,
+        })
+      }
+    }
+
+    // Subscribe before fetching (same ordering as useMessages/useScores) so
+    // an outcome landing mid-load can't fall between fetch and stream.
+    const channel = supabase
+      .channel(`reports:${conversationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'message_reports',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => applyRow(payload.new as MessageReport),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'message_reports',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => applyRow(payload.new as MessageReport),
+      )
+      .subscribe()
+
     supabase
       .from('message_reports')
-      .select('msg_id')
+      .select('msg_id, status, outcome_reasoning')
       .eq('conversation_id', conversationId)
       .then(({ data, error }) => {
         if (cancelled) return
@@ -38,13 +94,19 @@ export function useMessageReport(conversationId: string | undefined) {
           console.warn('loading prior reports failed:', error.message)
           return
         }
-        setReportedIds(new Set(data.map((r) => r.msg_id as string)))
+        for (const row of data) {
+          upsertOutcome(row.msg_id as string, {
+            status: row.status as string,
+            outcomeReasoning: row.outcome_reasoning as string | null,
+          })
+        }
       })
 
     return () => {
       cancelled = true
+      supabase.removeChannel(channel)
     }
-  }, [conversationId])
+  }, [conversationId, upsertOutcome])
 
   const report = useCallback(
     async (msgId: string, reason: string): Promise<boolean> => {
@@ -63,12 +125,14 @@ export function useMessageReport(conversationId: string | undefined) {
         return false
       }
 
-      setReportedIds((prev) => new Set(prev).add(msgId))
+      // Optimistic 'pending'; the Realtime echo (and later the backend's
+      // outcome UPDATE) converge through the same upsert.
+      upsertOutcome(msgId, { status: 'pending', outcomeReasoning: null })
       requestReportRescoring(conversationId, msgId, trimmed)
       return true
     },
-    [conversationId, user],
+    [conversationId, user, upsertOutcome],
   )
 
-  return { reportedIds, report }
+  return { reports, report }
 }

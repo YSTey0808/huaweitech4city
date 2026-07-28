@@ -118,7 +118,11 @@ the messages above -- a person in the conversation saw something worth
 flagging, so you may conclude "harmful" even if the classifier's scores are
 low. Do not rubber-stamp it either: conclude "harmful" only if the reported
 message and its context actually support it, and always include the reported
-message in top_evidence_messages with your assessment reflected in its tags."""
+message in top_evidence_messages with your assessment reflected in its tags.
+If you conclude "safe" despite this report, use gentle_alert_text to briefly
+and kindly explain to the reporter why the reported message doesn't appear
+harmful in context -- they will read it as the outcome of their report, so
+address their stated reason, not just the score."""
 
     prompt = f"""You are a content-safety reasoning assistant. You are given every
 message in a conversation's scoring window, plus a pre-computed risk score
