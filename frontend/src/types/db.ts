@@ -55,6 +55,7 @@ export interface MessageScore {
   msg_id: string;
   label: string | null;
   confidence: number | null;
+  source: string;
   created_at: string;
 }
 
@@ -66,5 +67,18 @@ export interface ConversationScore {
   evidence_msg_ids: string[] | null;
   severity: string | null;
   reasoning: string | null;
+  source: string;
+  created_at: string;
+}
+
+// A user-filed report that a message the model didn't flag is actually
+// harmful. RLS restricts rows to the reporter (see migration 008) -- a
+// conversation's other member never sees who reported what.
+export interface MessageReport {
+  id: string;
+  msg_id: string;
+  conversation_id: string;
+  reporter_id: string;
+  reason: string;
   created_at: string;
 }

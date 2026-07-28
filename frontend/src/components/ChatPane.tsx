@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { useMessages } from '../hooks/useMessages'
 import type { ChatMessage } from '../hooks/useMessages'
+import { useMessageReport } from '../hooks/useMessageReport'
 import { useScores } from '../hooks/useScores'
 import AlertPanel from './AlertPanel'
 import Avatar from './Avatar'
@@ -26,6 +27,10 @@ function MessageBubble({
   scores,
   isEvidence,
   isTarget,
+  reported,
+  reportOpen,
+  onToggleReport,
+  onSubmitReport,
 }: {
   msg: ChatMessage
   own: boolean
@@ -33,7 +38,12 @@ function MessageBubble({
   scores?: MessageScore[]
   isEvidence?: boolean
   isTarget?: boolean
+  reported: boolean
+  reportOpen: boolean
+  onToggleReport: () => void
+  onSubmitReport: (reason: string) => void
 }) {
+  const [reason, setReason] = useState('')
   // Directly flagged (red) beats evidence-of-conversation-score (amber).
   const flagged = scores !== undefined && scores.length > 0
   const highlight = flagged ? 'ring-2 ring-red-400' : isEvidence ? 'ring-2 ring-amber-400' : ''
@@ -63,6 +73,7 @@ function MessageBubble({
               >
                 {s.label}
                 {s.confidence != null && <> · {Math.round(s.confidence * 100)}%</>}
+                {s.source === 'user_report' && <> · reported</>}
               </span>
             ))}
           </div>
@@ -79,6 +90,53 @@ function MessageBubble({
             formatTime(msg.created_at)
           )}
         </p>
+        {/* Reporting a message you sent yourself doesn't fit "flag harm from
+            someone else" in a 2-party DM, so this is only offered on the
+            other person's messages. Already-flagged messages hide the
+            action entirely (nothing left to catch) -- except the "Reported"
+            confirmation itself, which stays visible even if this user's own
+            report is what caused the flag. */}
+        {!own &&
+          (reported ? (
+            <p className="mt-1 text-[11px] text-slate-400">Reported — thanks</p>
+          ) : flagged ? null : reportOpen ? (
+            <div className="mt-1 space-y-1">
+              <textarea
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Why does this seem harmful?"
+                rows={2}
+                autoFocus
+                className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    if (!reason.trim()) return
+                    onSubmitReport(reason)
+                    setReason('')
+                  }}
+                  disabled={!reason.trim()}
+                  className="rounded bg-red-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  Submit
+                </button>
+                <button
+                  onClick={onToggleReport}
+                  className="rounded border border-slate-300 px-2 py-0.5 text-[11px] text-slate-600 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={onToggleReport}
+              className="mt-0.5 text-[11px] text-slate-400 underline hover:text-slate-600"
+            >
+              Report
+            </button>
+          ))}
       </div>
     </div>
   )
@@ -94,8 +152,11 @@ export default function ChatPane({ conversationId, friend }: ChatPaneProps) {
     loading: scoresLoading,
     error: scoresError,
   } = useScores(conversationId)
+  const { reportedIds, report } = useMessageReport(conversationId)
   const [draft, setDraft] = useState('')
   const [alertsOpen, setAlertsOpen] = useState(false)
+  // Which message's inline report form is open -- only one at a time.
+  const [reportingId, setReportingId] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   // Deep-link target from /reports (?msg=<id>). Handled once per mount; the
   // key={conversationId} remount in ChatPage resets it per conversation.
@@ -202,6 +263,13 @@ export default function ChatPane({ conversationId, friend }: ChatPaneProps) {
                 scores={messageScores.get(m.id)}
                 isEvidence={evidenceIds.has(m.id)}
                 isTarget={m.id === flashId}
+                reported={reportedIds.has(m.id)}
+                reportOpen={reportingId === m.id}
+                onToggleReport={() => setReportingId((id) => (id === m.id ? null : m.id))}
+                onSubmitReport={async (reason) => {
+                  const ok = await report(m.id, reason)
+                  if (ok) setReportingId(null)
+                }}
               />
             ))
           )}
