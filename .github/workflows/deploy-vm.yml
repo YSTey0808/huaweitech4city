@@ -1,0 +1,40 @@
+# Auto-deploy the backend to the GCP VM. The VM equivalent of Vercel's GitHub
+# integration: instead of rebuilding in a container, we SSH in and update the
+# checkout in place (faster, and the ~2.4 GB embedding model stays cached).
+# See notes/VM_OPERATIONS.md section 3.
+name: Deploy backend to VM
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'pipeline/**'
+      - 'deploy/**'
+      - '.github/workflows/deploy-vm.yml'
+  workflow_dispatch:      # manual redeploy button in the Actions tab
+
+# Never let two deploys touch the VM at once; queue instead of cancelling, so a
+# superseded deploy still finishes cleanly rather than leaving a half-restart.
+concurrency:
+  group: deploy-vm
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Redeploy over SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VM_HOST }}      # static IP
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}    # private half of the deploy keypair
+          port: 22
+          command_timeout: 18m              # default is 10m; a pip install can exceed it
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd "$HOME/huaweitech4city"
+            BRANCH=main bash deploy/redeploy.sh
