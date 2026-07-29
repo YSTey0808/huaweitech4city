@@ -64,6 +64,11 @@ export default function AlertPanel({
                     {s.severity}
                   </span>
                 )}
+                {s.source === 'user_report' && (
+                  <span className="ml-2 rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700">
+                    reported
+                  </span>
+                )}
               </p>
               {s.reasoning && <p className="mt-1 text-xs text-red-800">{s.reasoning}</p>}
               <p className="mt-1 text-xs text-red-700">
@@ -91,6 +96,7 @@ export default function AlertPanel({
                     >
                       {s.label}
                       {s.confidence != null && <> · {percent(s.confidence)}</>}
+                      {s.source === 'user_report' && <> · reported</>}
                     </span>
                   ))}
                 </div>

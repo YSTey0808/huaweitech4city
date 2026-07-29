@@ -24,6 +24,30 @@ Called by `supabase/functions/score-message` (the proxy), never directly by the 
 
 The backend never returns the model's raw verdict to the caller — it writes directly to `conversation_scores` / `message_scores` in Supabase (service role), and the frontend picks the result up via its existing Realtime subscription (`frontend/src/hooks/useScores.ts`), exactly like it did with the old mock. This response body is just a small operational summary, not the contract the UI depends on.
 
+### `POST /report`
+
+The human-feedback entrypoint — a user telling the system it got a message wrong. Called by `supabase/functions/report-message` (a second thin proxy, same shape as `score-message`), never directly by the frontend. Same `X-Backend-Secret` gate as `/score`.
+
+**Request body:**
+```json
+{ "conversation_id": "uuid", "msg_id": "uuid", "reason": "string", "claim": "harmful" | "safe" }
+```
+
+`claim` is the report's direction:
+- `"harmful"` — "the model **missed** this" (a message the user believes is harmful but wasn't flagged).
+- `"safe"` — "the model **flagged** this wrongly" (a false-positive dispute of an existing flag).
+
+`reason` is the user's free-text explanation; rejected with `422` if blank (`backend/app/schemas/report.py`).
+
+**Response body** (`conversation_scores` field, one of):
+```json
+{ "conversation_scores": "message_not_found", "message_scores_inserted": 0 }
+{ "conversation_scores": "safe" | "inserted" | "updated", "message_scores_inserted": <int>, "report_status": "confirmed" | "dismissed" }
+{ "conversation_scores": "annulled" | "flag_stands", "message_scores_inserted": 0, "report_status": "confirmed" | "dismissed" }
+```
+
+`report_status` is what the LLM decided **relative to the claim**: `confirmed` = the LLM agreed with the human, `dismissed` = it disagreed. For a `harmful` report `confirmed` means "yes, flag it"; for a `safe` dispute `confirmed` means "yes, this was a false positive" (`annulled`). Like `/score`, the UI doesn't depend on this body — it reads the resulting `conversation_scores` / `message_scores` (via `useScores.ts`) and `message_reports` outcome (via `useMessageReport.ts`) over Realtime.
+
 ## Request handling, step by step
 
 1. `backend/app/api/routes/score.py` verifies `X-Backend-Secret`.
@@ -34,6 +58,31 @@ The backend never returns the model's raw verdict to the caller — it writes di
 6. `scoring_service.py::write_scores()` translates the verdict into rows:
    - If `conversation_label == "safe"`: write nothing (absence of rows = safe, same convention as the original mock).
    - Otherwise: upsert one `conversation_scores` row (`label`, `confidence`, `evidence_msg_ids`, `severity`, `reasoning`), and insert one `message_scores` row per evidence message (skipping ones that already have a row for that label) — same label for every evidence message, since the model produces one conversation-level verdict with per-message contribution scores, not independent per-message classifications.
+
+## Report handling & the human-feedback loop
+
+`POST /report` reuses the scoring machinery above with three differences (`backend/app/services/report_service.py`):
+
+1. **The window is anchored on the reported message.** `fetch_message_window(..., up_to_message_id=msg_id)` ends the window *at* the reported message instead of "now", so a report on a message older than the last `WINDOW_SIZE` still gets scored in context (and doubles as the check that `msg_id` actually belongs to `conversation_id` — a mismatch returns `[]` → `message_not_found`).
+2. **The report is passed to the LLM as context.** `score_conversation(..., user_report={message_id, reason, claim})` — the LLM is told a member reported/disputed this message and why, framed as a strong human signal to weigh, not an automatic override (see [pipeline.md](pipeline.md#llm-reasoning-stage)). It never re-runs the GNN's verdict blindly.
+3. **The write depends on the claim + verdict:**
+   - `harmful` report **confirmed** → `write_scores(..., source="user_report")`, same rows as `/score` but provenance-tagged.
+   - `safe` dispute **confirmed** → `_annul_message_flags()` **deletes** the message's `message_scores` rows and prunes it from `conversation_scores.evidence_msg_ids` (deleting the conversation row if that was its only evidence). Absence-of-rows = safe means clearing a wrong flag is a delete, not a write.
+   - Either **dismissed** → no score change; the existing state stands.
+
+   Afterwards, `_record_report_outcome()` stamps the `message_reports` row(s) — scoped to `(conversation_id, msg_id, claim, status='pending')` so it can't overwrite an unrelated resolved report on the same message — with `status` / `outcome_reasoning` (the LLM's `gentle_alert_text`, which the prompt asks it to address to the reporter on a dismissal) / `resolved_at`. The reporter streams that outcome over Realtime.
+
+### Watchlist — cross-conversation generalization
+
+Every scoring call (automatic *and* report-triggered) fetches confirmed past reports as few-shot reference patterns for the LLM prompt — `backend/app/services/watchlist_service.py::SupabaseWatchlist.get_confirmed_examples()`. This is what lets a pattern confirmed once in one conversation inform the LLM's judgment on *every other* conversation immediately, before any retrain closes the gap in the GNN's weights.
+
+- **"Confirmed" = `message_reports.status = 'confirmed'`** (the LLM agreed with the human), not merely "reported" — unreviewed/dismissed reports never reach other conversations' prompts, which is the poisoning guard against spam reports.
+- Both directions feed it: confirmed `harmful` reports become "known harmful patterns", confirmed `safe` disputes become "known false-positive patterns" that nudge the LLM *away* from re-flagging similar ordinary messages.
+- Fails safe (returns `[]` on any error — scoring never breaks) and is capped (`WATCHLIST_LIMIT`) to bound prompt growth. `WatchlistProvider` is a `Protocol` (mirroring `EmbeddingStore`), so a future similarity-based implementation (pgvector kNN over reported-message embeddings) can drop in behind the same method — the plain full-fetch is fine at current data volume.
+
+### Escalation & retraining data
+
+A dismissed report can be escalated for human review by the reporter (`escalate_report` RPC, migration 011) — a `SECURITY DEFINER` function pins the write to exactly `escalated_at`, so `message_reports` stays an insert-only log to any direct client write. Nothing in `backend/` acts on escalations yet; they're a durable, queryable signal (`select * from message_reports where escalated_at is not null`) of human-vs-model disagreements a person deemed worth review. More broadly, every confirmed report is already a joinable labeled example (`message_reports` + its message + `source='user_report'` score rows) for a future `train.py` retrain — the collection half of the loop is done; the scheduled retrain itself is the next operational step, deliberately manual (human review before merging) as the poisoning guard.
 
 ## Environment variables
 

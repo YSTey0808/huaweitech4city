@@ -37,11 +37,33 @@ export function useScores(conversationId: string | undefined): ConversationScore
       })
     }
 
+    // A confirmed false-positive dispute annuls score rows server-side (see
+    // backend report_service) -- DELETE payloads carry only the old row's
+    // primary key, so removal is by score id across all buckets.
+    const removeMessageScoreById = (scoreId: string) => {
+      setMessageScores((prev) => {
+        const next = new Map<string, MessageScore[]>()
+        let changed = false
+        for (const [msgId, bucket] of prev) {
+          const kept = bucket.filter((s) => s.id !== scoreId)
+          if (kept.length !== bucket.length) changed = true
+          if (kept.length > 0) next.set(msgId, kept)
+        }
+        return changed ? next : prev
+      })
+    }
+
     const upsertConversationScore = (score: ConversationScore) => {
       setConversationScores((prev) =>
         prev.some((s) => s.id === score.id)
           ? prev.map((s) => (s.id === score.id ? score : s))
           : [...prev, score],
+      )
+    }
+
+    const removeConversationScoreById = (scoreId: string) => {
+      setConversationScores((prev) =>
+        prev.some((s) => s.id === scoreId) ? prev.filter((s) => s.id !== scoreId) : prev,
       )
     }
 
@@ -80,6 +102,26 @@ export function useScores(conversationId: string | undefined): ConversationScore
         },
         (payload) => {
           if (!cancelled) upsertConversationScore(payload.new as ConversationScore)
+        },
+      )
+      // DELETE events (flag annulment) can't be filtered server-side: the
+      // payload only carries the old row's primary key. Unfiltered is safe
+      // for the same reason as the INSERT stream above -- ids from other
+      // conversations simply won't match anything in local state.
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'message_scores' },
+        (payload) => {
+          const oldId = (payload.old as { id?: string }).id
+          if (!cancelled && oldId) removeMessageScoreById(oldId)
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'conversation_scores' },
+        (payload) => {
+          const oldId = (payload.old as { id?: string }).id
+          if (!cancelled && oldId) removeConversationScoreById(oldId)
         },
       )
       .subscribe()

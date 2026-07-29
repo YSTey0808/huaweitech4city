@@ -12,6 +12,7 @@ import torch
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .api.routes.report import router as report_router
 from .api.routes.score import router as score_router
 from .core.config import get_settings
 from .services.embedding_store import LocalEmbeddingStore
@@ -53,6 +54,7 @@ app.add_middleware(
 )
 
 app.include_router(score_router)
+app.include_router(report_router)
 
 
 @app.get("/health")

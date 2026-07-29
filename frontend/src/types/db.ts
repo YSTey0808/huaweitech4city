@@ -55,6 +55,7 @@ export interface MessageScore {
   msg_id: string;
   label: string | null;
   confidence: number | null;
+  source: string;
   created_at: string;
 }
 
@@ -66,5 +67,30 @@ export interface ConversationScore {
   evidence_msg_ids: string[] | null;
   severity: string | null;
   reasoning: string | null;
+  source: string;
+  created_at: string;
+}
+
+// A user-filed report that a message the model didn't flag is actually
+// harmful. RLS restricts rows to the reporter (see migration 008) -- a
+// conversation's other member never sees who reported what.
+// status lifecycle (migration 009, stamped by the backend after the
+// report-triggered re-scoring): pending -> confirmed | dismissed.
+// claim (migration 010) is the report's direction: 'harmful' = the model
+// missed this; 'safe' = false-positive dispute of an existing flag.
+// `status`/`claim` stay open-ended strings per this file's convention.
+export interface MessageReport {
+  id: string;
+  msg_id: string;
+  conversation_id: string;
+  reporter_id: string;
+  reason: string;
+  claim: string;
+  status: string;
+  outcome_reasoning: string | null;
+  resolved_at: string | null;
+  // Set (migration 011) when the reporter escalates a dismissed outcome for
+  // human review -- the durable signal a reviewer / retraining pipeline reads.
+  escalated_at: string | null;
   created_at: string;
 }

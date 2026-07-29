@@ -5,6 +5,8 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { useMessages } from '../hooks/useMessages'
 import type { ChatMessage } from '../hooks/useMessages'
+import { useMessageReport } from '../hooks/useMessageReport'
+import type { ReportClaim, ReportOutcome } from '../hooks/useMessageReport'
 import { useScores } from '../hooks/useScores'
 import AlertPanel from './AlertPanel'
 import Avatar from './Avatar'
@@ -26,6 +28,11 @@ function MessageBubble({
   scores,
   isEvidence,
   isTarget,
+  reportOutcome,
+  reportOpen,
+  onToggleReport,
+  onSubmitReport,
+  onEscalate,
 }: {
   msg: ChatMessage
   own: boolean
@@ -33,7 +40,15 @@ function MessageBubble({
   scores?: MessageScore[]
   isEvidence?: boolean
   isTarget?: boolean
+  reportOutcome?: ReportOutcome // present iff this user reported this message
+  reportOpen: boolean
+  onToggleReport: () => void
+  onSubmitReport: (reason: string, claim: ReportClaim) => Promise<boolean>
+  onEscalate: () => Promise<boolean>
 }) {
+  const [reason, setReason] = useState('')
+  const [submitState, setSubmitState] = useState<'idle' | 'submitting' | 'failed'>('idle')
+  const [escalateState, setEscalateState] = useState<'idle' | 'submitting' | 'failed'>('idle')
   // Directly flagged (red) beats evidence-of-conversation-score (amber).
   const flagged = scores !== undefined && scores.length > 0
   const highlight = flagged ? 'ring-2 ring-red-400' : isEvidence ? 'ring-2 ring-amber-400' : ''
@@ -63,6 +78,7 @@ function MessageBubble({
               >
                 {s.label}
                 {s.confidence != null && <> · {Math.round(s.confidence * 100)}%</>}
+                {s.source === 'user_report' && <> · reported</>}
               </span>
             ))}
           </div>
@@ -79,6 +95,124 @@ function MessageBubble({
             formatTime(msg.created_at)
           )}
         </p>
+        {/* Feedback affordance -- only on the other person's messages
+            (reporting/disputing your own doesn't fit a 2-party DM). The
+            direction follows the message's current state (migration 010):
+            unflagged -> "Report" (claim harmful, the model missed this);
+            flagged -> "Not harmful?" (claim safe, dispute a false positive).
+            Outcome states (migration 009): pending = re-scoring still
+            running; confirmed = LLM agreed with the claim (flag appears or
+            is removed accordingly); dismissed = LLM disagreed, with its
+            reasoning shown so no report vanishes into silence. */}
+        {!own &&
+          (reportOutcome ? (
+            <div className="mt-1 text-[11px] text-slate-400">
+              {reportOutcome.status === 'pending' ? (
+                <p>{reportOutcome.claim === 'safe' ? 'Feedback sent' : 'Reported'} — awaiting review</p>
+              ) : reportOutcome.claim === 'safe' ? (
+                reportOutcome.status === 'confirmed' ? (
+                  <p className="text-emerald-700">Feedback accepted — flag removed</p>
+                ) : (
+                  <>
+                    <p>Feedback reviewed — flag stands</p>
+                    {reportOutcome.outcomeReasoning && (
+                      <p className="mt-0.5 italic text-slate-500">{reportOutcome.outcomeReasoning}</p>
+                    )}
+                  </>
+                )
+              ) : reportOutcome.status === 'confirmed' ? (
+                <p className="text-red-600">Reported — confirmed and flagged</p>
+              ) : (
+                <>
+                  <p>Reported — reviewed, not flagged</p>
+                  {reportOutcome.outcomeReasoning && (
+                    <p className="mt-0.5 italic text-slate-500">{reportOutcome.outcomeReasoning}</p>
+                  )}
+                </>
+              )}
+
+              {/* Escalation (migration 011) -- one shared block for both
+                  claim directions: whenever the LLM dismissed the report
+                  (disagreed with the human), offer a second, human opinion.
+                  Once escalated it's a durable record for reviewers /
+                  retraining, so the button gives way to a confirmation. */}
+              {reportOutcome.status === 'dismissed' &&
+                (reportOutcome.escalatedAt ? (
+                  <p className="mt-1 text-slate-500">Escalated for human review</p>
+                ) : (
+                  <div className="mt-1">
+                    <button
+                      onClick={async () => {
+                        if (escalateState === 'submitting') return
+                        setEscalateState('submitting')
+                        const ok = await onEscalate()
+                        setEscalateState(ok ? 'idle' : 'failed')
+                      }}
+                      disabled={escalateState === 'submitting'}
+                      className="text-slate-500 underline hover:text-slate-700 disabled:opacity-50"
+                    >
+                      {escalateState === 'submitting' ? 'Escalating…' : 'Escalate to human review'}
+                    </button>
+                    {escalateState === 'failed' && (
+                      <p className="mt-0.5 text-red-600">Couldn't escalate. Please try again.</p>
+                    )}
+                  </div>
+                ))}
+            </div>
+          ) : reportOpen ? (
+            <div className="mt-1 space-y-1">
+              <textarea
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder={flagged ? 'Why is this message not harmful?' : 'Why does this seem harmful?'}
+                rows={2}
+                autoFocus
+                className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={async () => {
+                    if (!reason.trim() || submitState === 'submitting') return
+                    setSubmitState('submitting')
+                    // Claim follows the flag state at submit time; only clear
+                    // the typed reason on success -- on failure it stays put
+                    // so the user can retry without retyping.
+                    const ok = await onSubmitReport(reason, flagged ? 'safe' : 'harmful')
+                    if (ok) {
+                      setReason('')
+                      setSubmitState('idle')
+                    } else {
+                      setSubmitState('failed')
+                    }
+                  }}
+                  disabled={!reason.trim() || submitState === 'submitting'}
+                  className={`rounded px-2 py-0.5 text-[11px] font-medium text-white disabled:opacity-50 ${
+                    flagged ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'
+                  }`}
+                >
+                  {submitState === 'submitting' ? 'Submitting…' : 'Submit'}
+                </button>
+                <button
+                  onClick={onToggleReport}
+                  className="rounded border border-slate-300 px-2 py-0.5 text-[11px] text-slate-600 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+              </div>
+              {submitState === 'failed' && (
+                <p className="text-[11px] text-red-600">
+                  Couldn't submit. Please try again.
+                </p>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={onToggleReport}
+              className="mt-0.5 text-[11px] text-slate-400 underline hover:text-slate-600"
+            >
+              {flagged ? 'Not harmful?' : 'Report'}
+            </button>
+          ))}
       </div>
     </div>
   )
@@ -94,8 +228,11 @@ export default function ChatPane({ conversationId, friend }: ChatPaneProps) {
     loading: scoresLoading,
     error: scoresError,
   } = useScores(conversationId)
+  const { reports, report, escalate } = useMessageReport(conversationId)
   const [draft, setDraft] = useState('')
   const [alertsOpen, setAlertsOpen] = useState(false)
+  // Which message's inline report form is open -- only one at a time.
+  const [reportingId, setReportingId] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   // Deep-link target from /reports (?msg=<id>). Handled once per mount; the
   // key={conversationId} remount in ChatPage resets it per conversation.
@@ -202,6 +339,15 @@ export default function ChatPane({ conversationId, friend }: ChatPaneProps) {
                 scores={messageScores.get(m.id)}
                 isEvidence={evidenceIds.has(m.id)}
                 isTarget={m.id === flashId}
+                reportOutcome={reports.get(m.id)}
+                reportOpen={reportingId === m.id}
+                onToggleReport={() => setReportingId((id) => (id === m.id ? null : m.id))}
+                onSubmitReport={async (reason, claim) => {
+                  const ok = await report(m.id, reason, claim)
+                  if (ok) setReportingId(null)
+                  return ok
+                }}
+                onEscalate={() => escalate(m.id)}
               />
             ))
           )}

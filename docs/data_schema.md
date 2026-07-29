@@ -87,6 +87,15 @@ JSONL, one conversation per line. Example:
 
 `backend/app/services/scoring_service.py` translates this into the Supabase contract the frontend actually reads — `conversation_scores` (`label`, `confidence`, `evidence_msg_ids`, `severity`, `reasoning`) and `message_scores` (`label`, `confidence` per evidence message). This translation layer is what the original `PROJECT_CONTEXT.md` flagged as "not implemented yet" — it now lives in `backend/`, not `pipeline/`, keeping the pipeline's own output format stable regardless of what any particular consumer's DB schema looks like. See [backend.md](backend.md).
 
+## Human-feedback loop (live schema)
+
+Live scoring can be wrong, so users can correct it and those corrections become training signal. This lives entirely in the **live** Supabase schema (migrations `008`–`012`), separate from the canonical training JSONL above — see [backend.md](backend.md#report-handling--the-human-feedback-loop) for the runtime flow and [frontend.md](frontend.md#report--feedback-ui) for the UI.
+
+- **`message_reports`** (migration 008) — one row per (user, message) correction. `claim` (migration 010) is the direction: `harmful` = "the model missed this", `safe` = "the model flagged this wrongly". `reason` is the user's free-text justification. `status` (migration 009): `pending` → `confirmed` | `dismissed`, stamped by the backend after the LLM re-reviews (`confirmed` = the LLM agreed with the claim). `outcome_reasoning` carries the LLM's explanation on a dismissal; `escalated_at` (migration 011) is set when the reporter escalates a dismissal for human review. RLS: a report is visible only to its reporter.
+- **`source`** on `message_scores` / `conversation_scores` (migration 008) — `model` (automatic) vs `user_report` (written by a confirmed `harmful` report). Sticky one-directionally: a later automatic pass never downgrades a human-confirmed row back to `model`.
+
+**As retraining data.** Every confirmed report is a labeled correction joinable back to its full conversation: `message_reports` (what + why + direction) → the `messages` it points at → `source='user_report'` score rows (the confirmed label). This is the collection half of the retrain loop — a future export into the canonical JSONL above + a `train.py` run is the next step, deliberately gated on human review of the reports queue (the poisoning guard), not automated. `escalated_at is not null` marks the highest-signal subset: human-vs-model disagreements a person flagged for a closer look.
+
 ## Scope
 
 - **First pass:** 2-speaker DMs, text-only.

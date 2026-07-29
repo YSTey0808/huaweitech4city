@@ -4,3 +4,4 @@ numpy
 sentence-transformers
 anthropic
 python-dotenv
+pytest

@@ -23,6 +23,8 @@ frontend/
 │   │   │                          fires the scoring trigger after insert (see below)
 │   │   ├── useConversations.ts    DM list via RPC `get_dm_overview` + Realtime
 │   │   ├── useScores.ts           message_scores / conversation_scores Realtime subscription
+│   │   │                          (incl. DELETE, for live flag removal on annulment)
+│   │   ├── useMessageReport.ts    file a report/dispute + stream its outcome; escalate a dismissal
 │   │   ├── useFlaggedConversations.ts
 │   │   └── useFriends.ts, useReports.ts
 │   ├── context/AuthContext.tsx   Supabase auth/session/profile context
@@ -48,6 +50,19 @@ The Edge Function (`supabase/functions/score-message`) is a thin proxy to `backe
 - Any `conversation_scores` row for the open conversation → warning banner: label, confidence, a **severity** badge, and a short **reasoning** sentence (both added in migration `007_add_llm_reasoning_fields.sql` once the real model replaced the mock — see [data_schema.md](data_schema.md#output-contract)). Its `evidence_msg_ids` messages get highlighted too.
 - Conversation list: badge on any conversation that has score rows.
 - Absence of rows = safe — nothing is written for safe conversations, so "no alert" and "not yet scored" look the same by design (matches the pipeline's own convention, see [pipeline.md](pipeline.md)).
+- A `source='user_report'` score row additionally renders a small "reported" tag, distinguishing a human-confirmed flag from an automatic one.
+
+## Report / feedback UI
+
+Users correct the model inline from the chat, on the **other** person's messages only (`ChatPane.tsx`'s `MessageBubble`, driven by `useMessageReport.ts`). The affordance's direction follows the message's current state — this is the frontend of the [human-feedback loop](backend.md#report-handling--the-human-feedback-loop):
+
+- **Unflagged message → "Report"** (claim `harmful`): "I think the model missed this." Inline reason box → submit.
+- **Flagged message → "Not harmful?"** (claim `safe`): "I think the model got this wrong." Same box, opposite direction.
+
+After submit, the same message shows the report's live outcome, streamed over Realtime from `message_reports` (RLS-scoped to the reporter): **awaiting review** → **confirmed** (the flag appears, or is removed for a confirmed dispute) or **reviewed, not flagged / flag stands** with the LLM's short explanation, so a dismissal never vanishes into silence. A confirmed dispute's flag disappears live because `useScores.ts` also subscribes to score-row **DELETEs** (this requires `REPLICA IDENTITY FULL` on the score tables — migration 012 — so Realtime can authorize DELETE events under RLS).
+
+- **Escalation:** a *dismissed* report shows "Escalate to human review" → one `escalate_report` RPC call sets `escalated_at`, then "Escalated for human review". A durable signal for later human review / retraining; nothing acts on it automatically yet.
+- State is DB-backed (fetched on load, not just session memory), so a reported/escalated message keeps its status across refreshes.
 
 ## Database schema
 
@@ -55,10 +70,12 @@ Defined in `supabase/migrations/`, mirrored in `frontend/src/types/db.ts`:
 
 - `profiles`, `friendships`, `conversations`, `conversation_members` — auth/social graph.
 - `messages(id, conversation_id, sender_id, content, msg_type, reply_to, created_at)` — text-only today; `msg_type`/`reply_to` exist so the schema already matches the pipeline's canonical shape.
-- `message_scores(id, msg_id, label, confidence, created_at)`.
-- `conversation_scores(id, conversation_id, label, confidence, evidence_msg_ids, severity, reasoning, created_at)`.
-- RLS everywhere: users only see conversations they're members of; scores visible only to members of the relevant conversation.
-- Realtime enabled on `messages`, `message_scores`, `conversation_scores`.
+- `message_scores(id, msg_id, label, confidence, source, created_at)`.
+- `conversation_scores(id, conversation_id, label, confidence, evidence_msg_ids, severity, reasoning, source, created_at)`.
+- `message_reports(id, msg_id, conversation_id, reporter_id, reason, claim, status, outcome_reasoning, resolved_at, escalated_at, created_at)` — user corrections; see [Report / feedback UI](#report--feedback-ui) and [data_schema.md](data_schema.md#human-feedback-loop-live-schema). RLS: visible only to the reporter.
+- `source` on the score tables = `model` (automatic) vs `user_report` (human-confirmed).
+- RLS everywhere: users only see conversations they're members of; scores visible only to members of the relevant conversation; reports only to their reporter.
+- Realtime enabled on `messages`, `message_scores`, `conversation_scores`, `message_reports`. The score tables use `REPLICA IDENTITY FULL` (migration 012) so DELETE events (flag annulment) are delivered under RLS.
 
 ## Environment variables
 
@@ -85,8 +102,8 @@ npm run dev            # http://localhost:5173
 ## Supabase setup
 
 1. Create a Supabase project and link it: `supabase link --project-ref <your-project-ref>` (run from the repo root — `supabase/` is shared infra, not inside `frontend/`).
-2. Apply the migrations in [`supabase/migrations/`](../supabase/migrations/) (`supabase db push`). They create all tables, RLS policies, and enable Realtime on `messages`, `message_scores`, and `conversation_scores`.
-3. Deploy the proxy function: `supabase functions deploy score-message`, and set its secrets (`BACKEND_URL`, `BACKEND_SHARED_SECRET`) — see [backend.md](backend.md#deployment).
+2. Apply the migrations in [`supabase/migrations/`](../supabase/migrations/) (`supabase db push`). They create all tables (including `message_reports`, migrations 008–012 for the human-feedback loop), RLS policies, the `escalate_report` RPC, and enable Realtime on `messages`, `message_scores`, `conversation_scores`, and `message_reports`.
+3. Deploy both proxy functions: `supabase functions deploy score-message report-message`, and set their secrets (`BACKEND_URL`, `BACKEND_SHARED_SECRET`) — see [backend.md](backend.md#deployment).
 
 ## Deploy to Vercel
 

@@ -142,6 +142,38 @@ Supabase Realtime pushes INSERT/UPDATE on message_scores / conversation_scores
   -> frontend/src/components/AlertPanel.tsx              renders flag + reasoning
 ```
 
+### Report flow — a user correcting the model
+
+The human-feedback loop reuses the same backend/pipeline machinery with a second proxy and a claim direction (`harmful` = model missed it, `safe` = false-positive dispute):
+
+```
+frontend/src/components/ChatPane.tsx  (Report / "Not harmful?" on a message)
+  -> frontend/src/hooks/useMessageReport.ts does TWO things:
+     (a) supabase.from('message_reports').insert(...)      -> straight to Supabase Postgres
+     (b) supabase.functions.invoke('report-message')        -> Supabase Edge Function
+
+supabase/functions/report-message/index.ts            (thin proxy, mirrors score-message)
+  -> checks auth + conversation membership
+  -> fetch(`${BACKEND_URL}/report`, { conversation_id, msg_id, reason, claim })
+
+backend/app/api/routes/report.py                      POST /report handler
+  -> backend/app/services/report_service.py
+      -> fetch_message_window(up_to_message_id=msg_id)   window anchored on the reported message
+      -> watchlist_service.py                            confirmed past reports as few-shot examples
+      -> pipeline/inference.py :: score_conversation(..., user_report=..., confirmed_examples=...)
+      <- on the verdict, one of:
+           write_scores(source='user_report')            harmful report confirmed  -> flag written
+           _annul_message_flags()                        safe dispute confirmed     -> flag rows DELETED
+           (nothing)                                     dismissed                   -> state stands
+      -> _record_report_outcome()                        stamp message_reports: status / reasoning
+
+Supabase Realtime pushes changes:
+  message_scores / conversation_scores INSERT/UPDATE/DELETE -> useScores.ts   (flag appears/updates/clears)
+  message_reports UPDATE                                    -> useMessageReport.ts (outcome shown to reporter)
+```
+
+Note the automatic `/score` path (above) *also* calls `watchlist_service.py` on every message — so a correction confirmed in one conversation reaches every other conversation's prompt immediately, not just the reported one. See [backend.md](backend.md#watchlist--cross-conversation-generalization).
+
 ## Graph storage & lifecycle
 
 Two different things persist, and only one of them is ever written to disk:
