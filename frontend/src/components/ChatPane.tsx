@@ -67,15 +67,15 @@ function MessageBubble({
                 ? 'rounded-2xl rounded-br-md shadow-bubble'
                 : 'rounded-2xl rounded-bl-md shadow-bubble'
           } ${highlight} ${flash} ${
+            // Each side keeps its own fill; only the BORDER changes when
+            // flagged. An outgoing harmful message stays beige (it's still
+            // your own message) and simply gains the red safety outline.
             own
-              ? // Warm beige rather than brand red: red is reserved for the Nuwa
-                // mark, safety accents and harmful states, so an ordinary
-                // outgoing message must not read as an alert.
-                `border border-outgoing-border bg-outgoing text-slate-900 ${
-                  msg.status === 'sending' ? 'opacity-60' : ''
-                }`
+              ? `border-[1.5px] bg-outgoing text-slate-900 ${
+                  flagged ? 'border-harm-outline shadow-harm' : 'border-outgoing-border'
+                } ${msg.status === 'sending' ? 'opacity-60' : ''}`
               : flagged
-                ? // Outline-only: near-white fill with a full 1.5px rounded
+                ? // Incoming flagged: near-white fill with the same 1.5px
                   // outline plus a soft halo. No left accent -- an even outline
                   // reads as Nuwa highlighting the message, where a side stripe
                   // turned the bubble into an alert card. Filled pink stays in
