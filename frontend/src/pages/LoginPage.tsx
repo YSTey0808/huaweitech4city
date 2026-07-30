@@ -46,7 +46,7 @@ export default function LoginPage() {
     <main className="min-h-screen flex items-center justify-center bg-slate-50 px-4 py-10">
       <div className="w-full max-w-sm">
         <h1 className="text-2xl font-bold text-slate-900">Log in</h1>
-        <p className="mt-1 text-sm text-slate-500">Welcome back to Harm-Detection Chat.</p>
+        <p className="mt-1 text-sm text-slate-500">Welcome back to Nuwa Safety Chat.</p>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <div>
@@ -60,7 +60,7 @@ export default function LoginPage() {
               required
               value={identifier}
               onChange={(e) => setIdentifier(e.target.value)}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-field-focus focus:shadow-field"
             />
           </div>
 
@@ -75,7 +75,7 @@ export default function LoginPage() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-field-focus focus:shadow-field"
             />
           </div>
 
@@ -84,7 +84,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={pending}
-            className="w-full rounded-md bg-emerald-600 px-4 py-2 font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+            className="w-full rounded-md bg-gradient-to-br from-brand-600 to-brand-700 px-4 py-2 font-semibold text-white shadow-brand transition-all hover:brightness-110 disabled:opacity-50"
           >
             {pending ? 'Logging in…' : 'Log in'}
           </button>
@@ -92,7 +92,7 @@ export default function LoginPage() {
 
         <p className="mt-6 text-center text-sm text-slate-600">
           No account?{' '}
-          <Link to="/signup" className="font-medium text-emerald-700 hover:underline">
+          <Link to="/signup" className="font-medium text-brand-600 hover:underline">
             Sign up
           </Link>
         </p>

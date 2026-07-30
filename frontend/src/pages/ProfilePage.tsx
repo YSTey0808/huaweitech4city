@@ -7,31 +7,29 @@ import { USERNAME_RE, SG_PHONE_RE } from '../lib/validators'
 
 // All dark enough for white initials; first entry is the DB signup default.
 const SWATCHES = [
-  { hex: '#64748b', label: 'Slate' },
-  { hex: '#dc2626', label: 'Red' },
-  { hex: '#ea580c', label: 'Orange' },
-  { hex: '#d97706', label: 'Amber' },
-  { hex: '#65a30d', label: 'Lime' },
-  { hex: '#16a34a', label: 'Green' },
-  { hex: '#059669', label: 'Emerald' },
-  { hex: '#0d9488', label: 'Teal' },
-  { hex: '#0891b2', label: 'Cyan' },
-  { hex: '#0284c7', label: 'Sky' },
-  { hex: '#2563eb', label: 'Blue' },
-  { hex: '#4f46e5', label: 'Indigo' },
-  { hex: '#7c3aed', label: 'Violet' },
-  { hex: '#9333ea', label: 'Purple' },
-  { hex: '#c026d3', label: 'Fuchsia' },
-  { hex: '#db2777', label: 'Pink' },
+  { hex: '#8d827b', label: 'Stone' },
+  { hex: '#6f6661', label: 'Taupe' },
+  { hex: '#c8102e', label: 'Nuwa red' },
+  { hex: '#b3122d', label: 'Crimson' },
+  { hex: '#a8562f', label: 'Clay' },
+  { hex: '#b87a2c', label: 'Amber' },
+  { hex: '#8a7b3f', label: 'Olive' },
+  { hex: '#5c7346', label: 'Moss' },
+  { hex: '#3f6b63', label: 'Pine' },
+  { hex: '#3d6480', label: 'Slate blue' },
+  { hex: '#4a5680', label: 'Indigo' },
+  { hex: '#6b4f73', label: 'Plum' },
 ]
 
 const BIO_MAX = 160
 
 const inputCls =
-  'mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'
-const labelCls = 'block text-sm font-medium text-slate-700'
+  'mt-1.5 w-full rounded-xl border border-field-border bg-field px-3.5 py-2.5 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-field-focus focus:shadow-field'
+const labelCls = 'block text-[13px] font-medium text-slate-700'
+// Primary action: flat Huawei red, not a gradient -- lighter weight than the
+// old chunky button while staying the clear primary on the page.
 const buttonCls =
-  'w-full rounded-md bg-emerald-600 px-4 py-2 font-medium text-white hover:bg-emerald-700 disabled:opacity-50'
+  'w-full rounded-xl bg-brand-600 px-6 py-3 text-sm font-bold text-white shadow-brand transition-all hover:brightness-110 disabled:opacity-50'
 
 export default function ProfilePage() {
   const { user, profile, setProfile } = useAuth()
@@ -41,7 +39,7 @@ export default function ProfilePage() {
   const [username, setUsername] = useState('')
   const [phone, setPhone] = useState('')
   const [bio, setBio] = useState('')
-  const [color, setColor] = useState('#64748b')
+  const [color, setColor] = useState('#8d827b')
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -62,7 +60,7 @@ export default function ProfilePage() {
       setUsername(profile.username ?? '')
       setPhone(profile.phone ?? '')
       setBio(profile.bio ?? '')
-      setColor(profile.avatar_color ?? '#64748b')
+      setColor(profile.avatar_color ?? '#8d827b')
     }
   }, [profile])
 
@@ -193,32 +191,40 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-sm px-4 py-10">
-      <h1 className="text-2xl font-bold text-slate-900">Your profile</h1>
+    <div className="mx-auto w-full max-w-md px-4 py-8">
+      <h1 className="text-xl font-semibold tracking-tight text-slate-900">Your profile</h1>
       <p className="mt-1 text-sm text-slate-500">
         This is how you appear to others in chats.
       </p>
 
-      <div className="mt-6 flex items-center gap-4">
+      <div className="mt-5 flex items-center gap-3.5 rounded-xl border border-field-border bg-field px-4 py-3.5 shadow-card">
         <Avatar
           size="lg"
           name={displayName || profile?.username || user?.email}
           color={color}
         />
         <div className="min-w-0">
-          <p className="truncate font-medium text-slate-900">
+          <p className="truncate text-sm font-semibold text-slate-900">
             {displayName || profile?.username || user?.email}
           </p>
           {profile?.username && (
-            <p className="truncate text-sm text-slate-500">@{profile.username}</p>
+            <p className="truncate text-[13px] text-slate-600">@{profile.username}</p>
           )}
           {memberSince && (
-            <p className="truncate text-sm text-slate-500">Member since {memberSince}</p>
+            <p className="mt-0.5 truncate text-[11px] text-slate-400">
+              Member since {memberSince}
+            </p>
           )}
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+      {/* Section label + thin divider rather than a second floating card --
+          groups the fields without stacking panels on panels. */}
+      <h2 className="mt-7 border-b border-field-border pb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+        Profile information
+      </h2>
+
+      <form onSubmit={handleSubmit} className="mt-4 space-y-3.5">
         <div>
           <label htmlFor="displayName" className={labelCls}>
             Display name
@@ -303,7 +309,7 @@ export default function ProfilePage() {
 
         <fieldset>
           <legend className={labelCls}>Avatar colour</legend>
-          <div className="mt-2 flex flex-wrap gap-3">
+          <div className="mt-2.5 flex flex-wrap gap-2.5">
             {SWATCHES.map(({ hex, label }) => (
               <button
                 key={hex}
@@ -314,8 +320,10 @@ export default function ProfilePage() {
                   setColor(hex)
                   touch()
                 }}
-                className={`h-8 w-8 rounded-full ${
-                  color === hex ? 'ring-2 ring-emerald-500 ring-offset-2' : ''
+                className={`h-7 w-7 rounded-full transition-transform hover:scale-105 ${
+                  color === hex
+                    ? 'ring-2 ring-slate-900 ring-offset-2 ring-offset-canvas'
+                    : 'ring-1 ring-black/5'
                 }`}
                 style={{ backgroundColor: hex }}
               />
@@ -324,15 +332,17 @@ export default function ProfilePage() {
             <label
               aria-label="Custom colour"
               title="Custom colour"
-              className={`relative h-8 w-8 cursor-pointer rounded-full ${
-                isCustomColor ? 'ring-2 ring-emerald-500 ring-offset-2' : ''
+              className={`relative h-7 w-7 cursor-pointer rounded-full transition-transform hover:scale-105 ${
+                isCustomColor
+                  ? 'ring-2 ring-slate-900 ring-offset-2 ring-offset-canvas'
+                  : 'ring-1 ring-black/5'
               }`}
               style={
                 isCustomColor
                   ? { backgroundColor: color }
                   : {
                       background:
-                        'conic-gradient(#dc2626, #d97706, #16a34a, #0891b2, #2563eb, #9333ea, #dc2626)',
+                        'conic-gradient(#c8102e, #b87a2c, #5c7346, #3f6b63, #4a5680, #6b4f73, #c8102e)',
                     }
               }
             >
@@ -358,13 +368,17 @@ export default function ProfilePage() {
       </form>
 
       {hasPasswordLogin && (
-        <form onSubmit={handlePasswordSubmit} className="mt-10 space-y-4 border-t border-slate-200 pt-6">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900">Change password</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              You'll stay logged in after changing it.
-            </p>
+        <form onSubmit={handlePasswordSubmit} className="mt-8 space-y-3.5">
+          {/* Same label + divider treatment as the profile section above, so
+              the two groups read as one page rather than two components. */}
+          <div className="border-b border-field-border pb-2">
+            <h2 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              Password
+            </h2>
           </div>
+          <p className="!mt-2 text-[13px] text-slate-600">
+            You'll stay logged in after changing it.
+          </p>
 
           <div>
             <label htmlFor="currentPw" className={labelCls}>

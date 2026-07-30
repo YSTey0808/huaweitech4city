@@ -85,7 +85,7 @@ export default function SignupPage() {
           </p>
           <Link
             to="/login"
-            className="mt-6 inline-block rounded-md bg-emerald-600 px-4 py-2 font-medium text-white hover:bg-emerald-700"
+            className="mt-6 inline-block rounded-md bg-gradient-to-br from-brand-600 to-brand-700 px-4 py-2 font-semibold text-white shadow-brand transition-all hover:brightness-110"
           >
             Go to log in
           </Link>
@@ -98,7 +98,7 @@ export default function SignupPage() {
     <main className="min-h-screen flex items-center justify-center bg-slate-50 px-4 py-10">
       <div className="w-full max-w-sm">
         <h1 className="text-2xl font-bold text-slate-900">Sign up</h1>
-        <p className="mt-1 text-sm text-slate-500">Create your Harm-Detection Chat account.</p>
+        <p className="mt-1 text-sm text-slate-500">Create your Nuwa Safety Chat account.</p>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <div>
@@ -113,7 +113,7 @@ export default function SignupPage() {
               maxLength={20}
               value={username}
               onChange={(e) => setUsername(e.target.value.toLowerCase())}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-field-focus focus:shadow-field"
             />
           </div>
 
@@ -128,7 +128,7 @@ export default function SignupPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-field-focus focus:shadow-field"
             />
           </div>
 
@@ -143,7 +143,7 @@ export default function SignupPage() {
               placeholder="+6591234567"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-field-focus focus:shadow-field"
             />
             <p className="mt-1 text-xs text-slate-500">Singapore number, display only.</p>
           </div>
@@ -160,7 +160,7 @@ export default function SignupPage() {
               minLength={6}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-field-focus focus:shadow-field"
             />
           </div>
 
@@ -176,7 +176,7 @@ export default function SignupPage() {
               minLength={6}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-field-focus focus:shadow-field"
             />
           </div>
 
@@ -185,7 +185,7 @@ export default function SignupPage() {
           <button
             type="submit"
             disabled={pending}
-            className="w-full rounded-md bg-emerald-600 px-4 py-2 font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+            className="w-full rounded-md bg-gradient-to-br from-brand-600 to-brand-700 px-4 py-2 font-semibold text-white shadow-brand transition-all hover:brightness-110 disabled:opacity-50"
           >
             {pending ? 'Creating account…' : 'Sign up'}
           </button>
@@ -193,7 +193,7 @@ export default function SignupPage() {
 
         <p className="mt-6 text-center text-sm text-slate-600">
           Already have an account?{' '}
-          <Link to="/login" className="font-medium text-emerald-700 hover:underline">
+          <Link to="/login" className="font-medium text-brand-600 hover:underline">
             Log in
           </Link>
         </p>

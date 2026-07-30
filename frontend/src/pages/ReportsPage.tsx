@@ -4,6 +4,7 @@ import { useReports } from '../hooks/useReports'
 import type { FlaggedMessage } from '../hooks/useReports'
 import { useConversations } from '../hooks/useConversations'
 import Avatar from '../components/Avatar'
+import RiskBadge from '../components/RiskBadge'
 
 // One display row per score row — message and conversation scores normalized
 // into a common shape so filtering/grouping/sorting treat them uniformly.
@@ -19,18 +20,17 @@ interface ReportEntry {
 }
 
 function EntryRow({ entry, onOpen }: { entry: ReportEntry; onOpen: (e: ReportEntry) => void }) {
-  const badge =
-    entry.kind === 'message' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'
   return (
     <button
       onClick={() => onOpen(entry)}
-      className="w-full rounded-md border border-slate-200 bg-white p-3 text-left hover:bg-slate-50 md:grid md:grid-cols-[8rem_minmax(0,1fr)_auto] md:items-center md:gap-3"
+      className="w-full rounded-xl border border-slate-200/70 bg-ivory p-3 text-left transition-colors hover:bg-slate-50 md:grid md:grid-cols-[9rem_minmax(0,1fr)_auto] md:items-center md:gap-3"
     >
       <span>
-        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium capitalize ${badge}`}>
-          {entry.label ?? 'flagged'}
-          {entry.confidence != null && <> · {Math.round(entry.confidence * 100)}%</>}
-        </span>
+        <RiskBadge
+          label={entry.label ?? 'flagged'}
+          confidence={entry.confidence}
+          tone={entry.kind === 'message' ? 'red' : 'amber'}
+        />
       </span>
       <span className="mt-1 block min-w-0 md:mt-0">
         {entry.texts.length === 0 ? (
@@ -153,7 +153,7 @@ export default function ReportsPage() {
                   onClick={() => setFilter(label)}
                   className={`rounded-full px-3 py-1 text-xs font-medium capitalize ${
                     active
-                      ? 'bg-emerald-600 text-white'
+                      ? 'bg-gradient-to-br from-brand-600 to-brand-700 text-white shadow-brand'
                       : 'border border-slate-300 text-slate-700 hover:bg-slate-100'
                   }`}
                 >

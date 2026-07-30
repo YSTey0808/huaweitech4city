@@ -89,8 +89,8 @@ export default function FriendsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-sm px-4 py-10">
-      <h1 className="text-2xl font-bold text-slate-900">Friends</h1>
+    <div className="mx-auto w-full max-w-md px-4 py-8">
+      <h1 className="text-xl font-semibold tracking-tight text-slate-900">Friends</h1>
       <p className="mt-1 text-sm text-slate-500">Add friends by username or email.</p>
 
       <form onSubmit={handleSearch} className="mt-6 flex gap-2">
@@ -100,12 +100,12 @@ export default function FriendsPage() {
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Username or email"
           aria-label="Search by username or email"
-          className="w-full min-w-0 rounded-md border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+          className="w-full min-w-0 rounded-xl border border-field-border bg-field px-3.5 py-2.5 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-field-focus focus:shadow-field"
         />
         <button
           type="submit"
           disabled={searching}
-          className="shrink-0 rounded-md bg-emerald-600 px-4 py-2 font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+          className="shrink-0 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold text-white shadow-brand transition-all hover:brightness-110 disabled:opacity-50"
         >
           {searching ? 'Searching…' : 'Search'}
         </button>
@@ -119,11 +119,11 @@ export default function FriendsPage() {
         (results.length === 0 ? (
           <p className="mt-4 text-sm text-slate-500">No users found.</p>
         ) : (
-          <ul className="mt-4 divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
+          <ul className="mt-4 divide-y divide-field-border/70 overflow-hidden rounded-xl border border-field-border bg-field shadow-card">
             {results.map((r) => {
               const isFriend = friends.some((f) => f.id === r.id) || addedIds.has(r.id)
               return (
-                <li key={r.id} className="flex items-center gap-3 px-3 py-2">
+                <li key={r.id} className="flex items-center gap-3 px-3.5 py-2.5">
                   <Avatar size="sm" name={r.display_name ?? r.username} color={r.avatar_color} />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-slate-900">
@@ -137,7 +137,7 @@ export default function FriendsPage() {
                     <button
                       onClick={() => handleOpenChat(r)}
                       disabled={openingId !== null}
-                      className="shrink-0 rounded-md border border-emerald-600 px-3 py-1 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                      className="shrink-0 rounded-xl border border-field-border bg-field px-4 py-1.5 text-sm font-semibold text-brand-600 transition-colors hover:border-brand-200 hover:bg-brand-50 disabled:opacity-50"
                     >
                       {openingId === r.id ? 'Opening…' : addedIds.has(r.id) ? 'Say hi' : 'Chat'}
                     </button>
@@ -145,7 +145,7 @@ export default function FriendsPage() {
                     <button
                       onClick={() => handleAdd(r)}
                       disabled={addingId !== null}
-                      className="shrink-0 rounded-md border border-emerald-600 px-3 py-1 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                      className="shrink-0 rounded-xl border border-field-border bg-field px-4 py-1.5 text-sm font-semibold text-brand-600 transition-colors hover:border-brand-200 hover:bg-brand-50 disabled:opacity-50"
                     >
                       {addingId === r.id ? 'Adding…' : 'Add'}
                     </button>
@@ -156,7 +156,7 @@ export default function FriendsPage() {
           </ul>
         ))}
 
-      <h2 className="mt-8 text-sm font-medium text-slate-700">Your friends</h2>
+      <h2 className="mt-8 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Your friends</h2>
       {friendsLoading ? (
         <p className="mt-2 text-sm text-slate-500">Loading…</p>
       ) : friends.length === 0 ? (
@@ -164,13 +164,13 @@ export default function FriendsPage() {
           No friends yet. Search above to add someone.
         </p>
       ) : (
-        <ul className="mt-2 divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
+        <ul className="mt-2 divide-y divide-field-border/70 overflow-hidden rounded-xl border border-field-border bg-field shadow-card">
           {friends.map((f) => (
             <li key={f.id}>
               <button
                 onClick={() => handleOpenChat(f)}
                 disabled={openingId !== null}
-                className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-slate-50 disabled:opacity-50"
+                className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left transition-colors outline-none hover:bg-slate-50 focus-visible:bg-slate-50 disabled:opacity-50"
               >
                 <Avatar size="md" name={f.display_name ?? f.username} color={f.avatar_color} />
                 <div className="min-w-0 flex-1">
