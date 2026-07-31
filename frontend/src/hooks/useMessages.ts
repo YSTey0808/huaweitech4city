@@ -94,6 +94,11 @@ export function useMessages(conversationId: string | undefined) {
           conversation_id: msg.conversation_id,
           sender_id: msg.sender_id,
           content: msg.content,
+          // Null for an ordinary message. Migration 014's trigger rejects a
+          // parent from another conversation, so the UI only ever offers
+          // messages from this thread (and only confirmed ones -- see
+          // ChatPane's reply button).
+          reply_to: msg.reply_to,
         })
         .select()
         .single()
@@ -115,7 +120,7 @@ export function useMessages(conversationId: string | undefined) {
   )
 
   const send = useCallback(
-    (content: string) => {
+    (content: string, replyTo?: string | null) => {
       if (!conversationId || !user) return
       const trimmed = content.trim()
       if (!trimmed) return
@@ -125,7 +130,7 @@ export function useMessages(conversationId: string | undefined) {
         sender_id: user.id,
         content: trimmed,
         msg_type: 'text',
-        reply_to: null,
+        reply_to: replyTo ?? null,
         created_at: new Date().toISOString(), // corrected by the server row
         status: 'sending',
       })
@@ -133,6 +138,8 @@ export function useMessages(conversationId: string | undefined) {
     [conversationId, user, insertMessage],
   )
 
+  // Re-inserts the stored row as-is, so reply_to (and everything else) is
+  // carried over -- a failed reply retries as a reply, not as a plain message.
   const retry = useCallback(
     (id: string) => {
       const failed = messages.find((m) => m.id === id && m.status === 'failed')
