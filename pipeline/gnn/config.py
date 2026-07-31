@@ -28,6 +28,6 @@ TOP_K_EVIDENCE = 5       # max messages the LLM is asked to CITE as evidence in 
                           # scoring window (see gnn/llm_stage.py) and judges from there;
                           # this only bounds how many it names back in top_evidence_messages.
 
-LLM_MODEL = "claude-sonnet-5"  # capable at reading nuance in the message text (the actual judgment call this stage
+LLM_MODEL = "claude-haiku-4-5-20251001"  # capable at reading nuance in the message text (the actual judgment call this stage
                                 # makes now, see gnn/llm_stage.py), at higher per-call cost/latency
                                 # than the small/fast model this was originally tuned for
