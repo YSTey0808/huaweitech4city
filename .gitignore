@@ -22,6 +22,25 @@ backend/data/
 backend/.env
 backend/.venv/
 
+# Partner API key minting stays OFF the production server. This tool mints
+# credentials for the public /v1/analyze API; keeping it out of git means the
+# deploy (deploy/redeploy.sh does a `git checkout -f`) never places it on the
+# VM, so key issuing only ever happens from a trusted local machine.
+#
+# Note this is hygiene, not a hard boundary: backend/.env on the VM already
+# holds SUPABASE_SERVICE_ROLE_KEY, which can write api_keys directly. The
+# point is to avoid shipping a ready-made "mint yourself a credential" tool
+# to an internet-facing host.
+#
+# Consequence: this file lives only on the machines that already have it. If
+# you need it elsewhere, copy it across manually -- a fresh clone will not
+# contain it. See docs/public_api.md.
+backend/scripts/mint_api_key.py
+
+# Any local record of issued keys -- never commit plaintext credentials.
+backend/scripts/*.keys
+*.keys.txt
+
 # frontend/ and supabase/ have their own .gitignore (node_modules, dist,
 # .env*, Supabase CLI's .branches/.temp) -- not duplicated here.
 
