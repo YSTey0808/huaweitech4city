@@ -13,6 +13,18 @@ This repo is a monorepo with three clearly separated pieces:
 
 If you only remember one rule: **`frontend/` is the UI, `backend/` is the API server, `pipeline/` is the model.** Everything else follows from that.
 
+## Use it in your own product
+
+The detection engine is available as a standalone API. Another company keeps their existing chat stack and adds harm detection with one HTTP call — no account, no data migration, no model to host:
+
+```bash
+curl -X POST https://<host>/v1/analyze \
+  -H "X-API-Key: pk_live_..." -H "Content-Type: application/json" \
+  -d '{"messages":[{"message_id":"m1","sender_id":"u1","text":"dont tell ur parents ok"}]}'
+```
+
+Returns the label, confidence, severity, the specific messages that drove the verdict, and user-facing alert text. Messages are scored in memory and never stored. Full contract: **[docs/public_api.md](docs/public_api.md)**.
+
 ## Architecture
 
 ![Component view: frontend, Supabase, backend, pipeline](docs/images/architecture-component-view.png)
@@ -56,6 +68,8 @@ Send a message containing known-harmful phrasing (see `pipeline/dataset/` once p
 - **[docs/architecture.md](docs/architecture.md)** — system diagrams, component responsibilities, call chain, graph storage & lifecycle.
 - **[docs/frontend.md](docs/frontend.md)** — UI structure, Realtime contract, env vars, Supabase setup, Vercel deploy.
 - **[docs/backend.md](docs/backend.md)** — `POST /score` + `POST /report` API contracts, the human-feedback loop (reports, watchlist, escalation), env vars, local run, Docker, Render deployment.
+- **[docs/public_api.md](docs/public_api.md)** — the partner-facing `POST /v1/analyze` contract, auth, rate limits, data handling, and how to mint keys.
+- **[docs/deploy_public_api.md](docs/deploy_public_api.md)** — runbook for testing and shipping the public API to the VM, including the TLS step and rollback.
 - **[docs/pipeline.md](docs/pipeline.md)** — GNN + LLM architecture, design rationale, known limitations.
 - **[docs/preprocessing.md](docs/preprocessing.md)** — message-text normalization spec.
 - **[docs/data_schema.md](docs/data_schema.md)** — canonical dataset schema, task definition, known schema issues (live vs. training field-name drift).
