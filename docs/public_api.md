@@ -11,7 +11,7 @@ The model is built for **code-mixed Singlish / Manglish / Mandarin** chat — th
 ## Quick start
 
 ```bash
-curl -X POST https://<your-backend-host>/v1/analyze \
+curl -X POST https://34.177.100.153.nip.io/v1/analyze \
   -H "X-API-Key: pk_live_..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -43,7 +43,7 @@ curl -X POST https://<your-backend-host>/v1/analyze \
 }
 ```
 
-Interactive reference with live request/response schemas: **`/docs`** on your backend host.
+Interactive reference with live request/response schemas: **<https://34.177.100.153.nip.io/docs>**.
 
 ---
 
@@ -117,7 +117,7 @@ Your verdicts do benefit from our feedback loop in one direction: patterns that 
 
 ## For maintainers
 
-**Minting and revoking keys** — from `backend/`:
+**Minting and revoking keys** — from `backend/`, **on a trusted local machine**:
 
 ```bash
 python scripts/mint_api_key.py --partner "Acme Chat"          # prints the key ONCE
@@ -126,7 +126,11 @@ python scripts/mint_api_key.py --list
 python scripts/mint_api_key.py --revoke <key-id>
 ```
 
-Revocation takes effect within 60s — `api_key_service` caches verified keys for that long to keep a Supabase round-trip off every request.
+> ⚠️ `backend/scripts/mint_api_key.py` is **gitignored and therefore absent from a fresh clone and from the production VM** — deliberately, so a credential-minting tool never sits on an internet-facing host. If you need it, get the file from someone who has it. Full reasoning in [deploy_public_api.md](deploy_public_api.md#issuing-api-keys--judges-partners-teammates).
+
+Revocation takes effect within 60s — `api_key_service` caches verified keys for that long to keep a Supabase round-trip off every request. `sudo systemctl restart backend` on the VM clears it immediately.
+
+**Rate limits are per key**, stored in `api_keys.rate_limit_per_min` and enforced in-process by `rate_limiter.py`. There is no edit command — to change a limit, revoke and re-mint.
 
 **How this differs from the internal path.** `POST /score` ([docs/backend.md](backend.md)) takes a `conversation_id` and re-fetches messages from our own Supabase, then writes `conversation_scores` / `message_scores` rows the frontend reads over Realtime. `POST /v1/analyze` shares the same model but is stateless in both directions: messages in the request, verdict in the response, no product table touched. `backend/app/services/public_scoring_service.py` is the stateless sibling of `scoring_service.py`, and both call the same `pipeline/inference.py::score_conversation()` — a partner is never served a different model than our own users.
 
