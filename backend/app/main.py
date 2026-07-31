@@ -12,6 +12,7 @@ import torch
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .api.routes.public_api import router as public_api_router
 from .api.routes.report import router as report_router
 from .api.routes.score import router as score_router
 from .core.config import get_settings
@@ -44,8 +45,25 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="huaweitech4city backend", lifespan=lifespan)
+app = FastAPI(
+    title="Harm Pattern Recognition API",
+    lifespan=lifespan,
+    description=(
+        "Real-time harm-pattern detection (cyberbullying, grooming, scams) for "
+        "code-mixed Singlish/Manglish/Mandarin chat.\n\n"
+        "**Partners: you only need `POST /v1/analyze`.** Send a conversation, get a "
+        "verdict back — no account, no data migration, no model to host. "
+        "See `docs/public_api.md`.\n\n"
+        "The `Internal` endpoints below are used by our own frontend via its Supabase "
+        "Edge Function proxies and are not part of the public contract."
+    ),
+)
 
+# Deliberately NOT widened for the public API. /v1/analyze is
+# server-to-server: an API key belongs on a partner's backend, never in a
+# browser where it would be readable by anyone who opens devtools. Keeping
+# this origin-restricted means a browser fetch fails by design rather than
+# quietly encouraging partners to ship their key to the client.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_settings().allowed_origins_list,
@@ -53,6 +71,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(public_api_router)
 app.include_router(score_router)
 app.include_router(report_router)
 

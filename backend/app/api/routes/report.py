@@ -10,7 +10,7 @@ from ...core.supabase_client import get_supabase
 from ...schemas.report import ReportRequest
 from ...services.report_service import report_message_request
 
-router = APIRouter()
+router = APIRouter(tags=["Internal"])
 
 
 @router.post("/report")

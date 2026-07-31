@@ -4,6 +4,13 @@
 
 ## API contract
 
+Two audiences, and the split matters:
+
+- **Internal** — `POST /score` and `POST /report`, below. Called only by our own Supabase Edge Function proxies. They take a `conversation_id`, re-fetch the messages from our Supabase, and write verdict rows the frontend reads over Realtime. Gated by the single shared `X-Backend-Secret`.
+- **Public** — `POST /v1/analyze`, the partner API. Stateless in both directions: messages in the request, verdict in the response, no product table touched. Per-partner API keys, rate limited. Documented separately in **[public_api.md](public_api.md)** — that file is the published contract, so treat renames there as breaking changes.
+
+Both go through the same `pipeline/inference.py::score_conversation()`; a partner is never served a different model than our own users.
+
 ### `POST /score`
 
 Called by `supabase/functions/score-message` (the proxy), never directly by the frontend.

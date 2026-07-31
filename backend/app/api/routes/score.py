@@ -9,7 +9,7 @@ from ...core.supabase_client import get_supabase
 from ...schemas.score import ScoreRequest
 from ...services.scoring_service import score_conversation_request
 
-router = APIRouter()
+router = APIRouter(tags=["Internal"])
 
 
 @router.post("/score")
