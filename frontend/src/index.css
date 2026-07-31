@@ -1,1 +1,174 @@
 @import "tailwindcss";
+
+/* Nuwa colour system: warm cream shell, warm-brown neutrals, Huawei-inspired
+   red as a restrained accent.
+ *
+ * Two deliberate choices here:
+ *
+ * 1. `brand-*` is the Nuwa red ramp. The class names throughout the app were
+ *    already brand-*, so redefining the ramp repoints every primary action,
+ *    active state and accent at once instead of touching ~70 call sites.
+ *
+ * 2. `slate-*` is REDEFINED as a warm brown-grey ramp rather than replaced
+ *    with a new token name. ~180 slate-* utilities across 13 files are the
+ *    app's neutrals; overriding the ramp turns all of them warm in one place
+ *    and keeps future edits using familiar names. Values track the brief's
+ *    palette (#241A18 text, #6F6661 secondary, #9A8F88 muted, #E7DED6 border).
+ *
+ * The red and amber ramps stay semantic harm signals -- they are retuned to
+ * the warm palette below, but must never be folded into the brand ramp. */
+@theme {
+  /* Nuwa red -- primary brand accent */
+  --color-brand-50: #fff1f3;
+  --color-brand-100: #ffd1d8;
+  --color-brand-200: #f7aab6;
+  --color-brand-300: #ee7d90;
+  --color-brand-400: #e04a66;
+  --color-brand-500: #d5122e;
+  --color-brand-600: #c8102e;
+  --color-brand-700: #a90f26;
+  --color-brand-800: #9f1026;
+
+  /* Warm neutral ramp -- overrides Tailwind's cool slate so every existing
+     slate-* utility in the app reads warm brown-grey instead of blue-grey. */
+  --color-slate-50: #faf6f1;
+  --color-slate-100: #f3ece4;
+  --color-slate-200: #e6d8cc;
+  --color-slate-300: #d8ccc1;
+  /* 400-600 darkened from the previous pass: muted text was reading washed
+     out against cream, which is most of what made the UI feel like a demo. */
+  --color-slate-400: #8d827b;
+  --color-slate-500: #756b65;
+  --color-slate-600: #5f5651;
+  --color-slate-700: #3f3531;
+  --color-slate-800: #2c211d;
+  --color-slate-900: #241a18;
+
+  /* Warm surface ladder, deepest to lightest. Keeping these separate is what
+     makes the harmful state readable: a flagged bubble's pink has to sit
+     against a neutral cream, not against another tinted surface.
+
+     Pure white is deliberately NOT in this ladder -- it is reserved for
+     message bubbles and small high-contrast cards, so large panels never flatten
+     into an admin-dashboard white.
+       canvas  #f5efe6  outer app background (deepest)
+       safety  #f8f1e8  safety alerts panel
+       chat    #fbf4ea  conversation canvas -- neutral, never tinted red
+       panel   #fff8ef  main shell panels / sidebar / chat header
+       ivory   #fffcf6  navbar and raised cards (lightest) */
+  --color-canvas: #f5efe6;
+  --color-safety: #f8f1e8;
+  --color-chat: #fbf4ea;
+  --color-panel: #fff8ef;
+  --color-ivory: #fffcf6;
+  /* Own-message bubble -- warm beige, so red stays reserved for safety.
+     Deeper than the chat canvas (#fbf4ea) on purpose: at a lighter value the
+     bubble blended into the background and outgoing messages lost their shape. */
+  --color-outgoing: #efe0d2;
+  --color-outgoing-border: #d9c2ae;
+
+  /* Neutral form surfaces. Inputs previously focused to brand-400/brand-100 --
+     but the brand ramp IS Nuwa red, so an ordinary focused field read as an
+     error state. Focus is warm taupe; red stays on brand actions and safety. */
+  --color-field: #fffdfb;
+  --color-field-border: #e4d8cc;
+  --color-field-focus: #cdbeaf;
+
+  /* Flagged CHAT BUBBLE surface. Deliberately near-white, not the filled
+     harm-bg pink used in the safety panel: in the conversation the flag is
+     carried by a full rounded outline + soft halo, so a scanned thread reads as
+     ordinary messages with one clearly highlighted exception, not a wall of
+     pink. */
+  --color-harm-bubble: #fffdfb;
+  --color-harm-outline: #ff7f96;
+  /* Badge set -- pale WARM fill (not the cooler pink used by the safety
+     panel's filled cards), soft border, deep red text. */
+  --color-harm-chip-bg: #fff8f5;
+  --color-harm-chip-border: #ffc6d0;
+  --color-harm-chip-text: #c7000b;
+  /* Score inside the badge: softer red, secondary to the label but never grey. */
+  --color-harm-score: #d94a5f;
+
+  /* Harmful/flagged surface set -- used ONLY for flagged states, never for
+     ordinary chrome, so pink always means "this was flagged". */
+  --color-harm-bg: #fff1f3;
+  --color-harm-border: #f26b82;
+  --color-harm-text: #b3122d;
+  /* Badge outline -- lighter than harm-border so the small pill reads as a
+     refined chip rather than a second alert outline. */
+  --color-harm-chip: #ffd1d8;
+
+  /* Soft, warm elevation -- brown-tinted rather than blue-black, so shadows
+     sit in the cream palette instead of greying it. */
+  --shadow-card: 0 1px 2px 0 rgb(38 27 24 / 0.06), 0 2px 5px -1px rgb(38 27 24 / 0.07);
+  --shadow-panel: 0 6px 22px -4px rgb(38 27 24 / 0.1), 0 3px 8px -3px rgb(38 27 24 / 0.07);
+  --shadow-bubble: 0 1px 2px 0 rgb(38 27 24 / 0.07);
+  --shadow-brand: 0 2px 8px -1px rgb(200 16 46 / 0.28);
+  /* Flagged bubble depth. Deliberately a NEUTRAL shadow, not a pink halo: a
+     coloured glow read as a selected/active UI state rather than a safety
+     detection. The outline alone carries the flag; this only stops the bubble
+     sitting flat on the canvas. */
+  --shadow-harm: 0 2px 6px rgb(52 42 36 / 0.04);
+  /* Neutral focus halo for form fields -- the warm counterpart to shadow-harm. */
+  --shadow-field: 0 0 0 3px rgb(205 190 175 / 0.22);
+
+  /* Harm signals. Kept semantic (never folded into the brand ramp) but retuned
+     to the warm palette: softer tints, deeper text, so a flag reads as a calm
+     status rather than an emergency light. */
+  --color-red-50: #fff1f3;
+  --color-red-100: #ffd1d8;
+  --color-red-200: #f7b6c0;
+  --color-red-300: #ef8b9c;
+  --color-red-400: #e05c74;
+  --color-red-500: #cf2544;
+  --color-red-600: #b31331;
+  --color-red-700: #9f1026;
+  --color-red-800: #85101f;
+  --color-red-900: #6b0f1a;
+
+  --color-amber-50: #fdf6ec;
+  --color-amber-100: #f8e6c9;
+  --color-amber-200: #efd0a1;
+  --color-amber-300: #e0b473;
+  --color-amber-400: #cf9445;
+  --color-amber-500: #b87a2c;
+  --color-amber-600: #9c6423;
+  --color-amber-700: #7d4f1d;
+  --color-amber-800: #63401a;
+
+  /* Success (report accepted / profile saved). Warmed to a muted olive so the
+     four existing emerald-* usages stop reading as cool mint against cream --
+     still unmistakably "good", just not a different temperature. */
+  --color-emerald-50: #f1f5ec;
+  --color-emerald-600: #5c7346;
+  --color-emerald-700: #4b5f39;
+}
+
+/* Soft pulse for the Nuwa status dot -- one slow opacity cycle, no motion or
+   glow. Respects prefers-reduced-motion below. */
+@keyframes nuwa-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.nuwa-pulse {
+  animation: nuwa-pulse 2.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nuwa-pulse {
+    animation: none;
+  }
+}
+
+/* Antialiasing: cheap, and does a lot of the work of making default system
+   type look less generic. */
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

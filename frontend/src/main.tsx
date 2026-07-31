@@ -11,7 +11,7 @@ import './index.css'
 function ConfigError() {
   return (
     <div className="flex min-h-dvh items-center justify-center bg-slate-50 p-4">
-      <div className="max-w-md rounded-lg border border-slate-200 bg-white p-6">
+      <div className="max-w-md rounded-lg border border-slate-200 bg-panel p-6">
         <h1 className="font-semibold text-slate-900">App not configured</h1>
         <p className="mt-2 text-sm text-slate-700">
           Missing Supabase environment variables{' '}

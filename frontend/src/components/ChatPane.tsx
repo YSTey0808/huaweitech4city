@@ -5,11 +5,12 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { useMessages } from '../hooks/useMessages'
 import type { ChatMessage } from '../hooks/useMessages'
-import { useMessageReport } from '../hooks/useMessageReport'
-import type { ReportClaim, ReportOutcome } from '../hooks/useMessageReport'
 import { useScores } from '../hooks/useScores'
 import AlertPanel from './AlertPanel'
 import Avatar from './Avatar'
+import RiskBadge from './RiskBadge'
+import ReportConversationDialog from './ReportConversationDialog'
+import FeedbackDialog from './FeedbackDialog'
 import type { MessageScore, Profile } from '../types/db'
 
 interface ChatPaneProps {
@@ -21,6 +22,10 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
+// Per-message feedback (Report / "Not harmful?" / outcome text / escalation)
+// was removed: reporting is now conversation-level via the chat header's
+// Report button. The bubble is presentational again -- it renders the message,
+// its harm badges and the timestamp, nothing interactive beyond retry.
 function MessageBubble({
   msg,
   own,
@@ -28,11 +33,6 @@ function MessageBubble({
   scores,
   isEvidence,
   isTarget,
-  reportOutcome,
-  reportOpen,
-  onToggleReport,
-  onSubmitReport,
-  onEscalate,
 }: {
   msg: ChatMessage
   own: boolean
@@ -40,50 +40,66 @@ function MessageBubble({
   scores?: MessageScore[]
   isEvidence?: boolean
   isTarget?: boolean
-  reportOutcome?: ReportOutcome // present iff this user reported this message
-  reportOpen: boolean
-  onToggleReport: () => void
-  onSubmitReport: (reason: string, claim: ReportClaim) => Promise<boolean>
-  onEscalate: () => Promise<boolean>
 }) {
-  const [reason, setReason] = useState('')
-  const [submitState, setSubmitState] = useState<'idle' | 'submitting' | 'failed'>('idle')
-  const [escalateState, setEscalateState] = useState<'idle' | 'submitting' | 'failed'>('idle')
   // Directly flagged (red) beats evidence-of-conversation-score (amber).
   const flagged = scores !== undefined && scores.length > 0
-  const highlight = flagged ? 'ring-2 ring-red-400' : isEvidence ? 'ring-2 ring-amber-400' : ''
+  // A directly-flagged bubble carries its own border + left accent (see the
+  // bubble classes below), so no extra ring -- doubling them read as a
+  // highlighter. Evidence-of-a-conversation-score keeps a soft amber ring,
+  // since that bubble is otherwise styled like an ordinary message.
+  const highlight = flagged ? '' : isEvidence ? 'ring-1 ring-amber-300' : ''
   // Deep-link flash uses outline so it stacks with the permanent ring flags.
-  const flash = isTarget ? 'outline-2 outline-offset-2 outline-emerald-500' : ''
+  const flash = isTarget ? 'outline-2 outline-offset-2 outline-brand-500' : ''
   return (
     <div id={`msg-${msg.id}`} className={`flex ${own ? 'justify-end' : 'justify-start'}`}>
-      <div className="max-w-[75%]">
+      {/* 75% of the column, but never wider than ~34rem: on a wide screen an
+          unbounded bubble produces uncomfortably long lines. */}
+      <div className="max-w-[min(75%,34rem)]">
         <div
           title={new Date(msg.created_at).toLocaleString()}
-          className={`rounded-lg px-3 py-2 text-sm break-words whitespace-pre-wrap ${highlight} ${flash} ${
+          className={`px-3.5 py-2 text-sm break-words whitespace-pre-wrap ${
+            // A flagged bubble keeps an even 16px radius on all four corners --
+            // the tail notch fought the full outline. Its halo replaces
+            // shadow-bubble so the two elevations don't stack.
+            flagged
+              ? 'rounded-2xl'
+              : own
+                ? 'rounded-2xl rounded-br-md shadow-bubble'
+                : 'rounded-2xl rounded-bl-md shadow-bubble'
+          } ${highlight} ${flash} ${
+            // Each side keeps its own fill; only the BORDER changes when
+            // flagged. An outgoing harmful message stays beige (it's still
+            // your own message) and simply gains the red safety outline.
             own
-              ? `bg-emerald-600 text-white ${msg.status === 'sending' ? 'opacity-60' : ''}`
+              ? `border-[1.5px] bg-outgoing text-slate-900 ${
+                  flagged ? 'border-harm-outline shadow-harm' : 'border-outgoing-border'
+                } ${msg.status === 'sending' ? 'opacity-60' : ''}`
               : flagged
-                ? 'border border-red-200 bg-red-50 text-slate-900'
-                : 'border border-slate-200 bg-white text-slate-900'
+                ? // Incoming flagged: near-white fill with the same 1.5px
+                  // outline plus a soft halo. No left accent -- an even outline
+                  // reads as Nuwa highlighting the message, where a side stripe
+                  // turned the bubble into an alert card. Filled pink stays in
+                  // the safety panel.
+                  'border-[1.5px] border-harm-outline bg-harm-bubble text-slate-900 shadow-harm'
+                : 'border border-slate-200/80 bg-white text-slate-900'
           }`}
         >
           {msg.content}
         </div>
         {flagged && (
-          <div className={`mt-0.5 flex flex-wrap gap-1 ${own ? 'justify-end' : ''}`}>
+          <div className={`mt-1 flex flex-wrap gap-1.5 ${own ? 'justify-end' : ''}`}>
             {scores.map((s) => (
-              <span
+              <RiskBadge
                 key={s.id}
-                className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700 capitalize"
-              >
-                {s.label}
-                {s.confidence != null && <> · {Math.round(s.confidence * 100)}%</>}
-                {s.source === 'user_report' && <> · reported</>}
-              </span>
+                size="sm"
+                label={s.label}
+                confidence={s.confidence}
+                source={s.source}
+              />
             ))}
           </div>
         )}
-        <p className={`mt-0.5 text-[11px] text-slate-400 ${own ? 'text-right' : ''}`}>
+        <p className={`mt-1 text-[11px] text-slate-400 ${own ? 'text-right' : ''}`}>
           {msg.status === 'failed' ? (
             <span className="text-red-600">
               Failed —{' '}
@@ -95,124 +111,6 @@ function MessageBubble({
             formatTime(msg.created_at)
           )}
         </p>
-        {/* Feedback affordance -- only on the other person's messages
-            (reporting/disputing your own doesn't fit a 2-party DM). The
-            direction follows the message's current state (migration 010):
-            unflagged -> "Report" (claim harmful, the model missed this);
-            flagged -> "Not harmful?" (claim safe, dispute a false positive).
-            Outcome states (migration 009): pending = re-scoring still
-            running; confirmed = LLM agreed with the claim (flag appears or
-            is removed accordingly); dismissed = LLM disagreed, with its
-            reasoning shown so no report vanishes into silence. */}
-        {!own &&
-          (reportOutcome ? (
-            <div className="mt-1 text-[11px] text-slate-400">
-              {reportOutcome.status === 'pending' ? (
-                <p>{reportOutcome.claim === 'safe' ? 'Feedback sent' : 'Reported'} — awaiting review</p>
-              ) : reportOutcome.claim === 'safe' ? (
-                reportOutcome.status === 'confirmed' ? (
-                  <p className="text-emerald-700">Feedback accepted — flag removed</p>
-                ) : (
-                  <>
-                    <p>Feedback reviewed — flag stands</p>
-                    {reportOutcome.outcomeReasoning && (
-                      <p className="mt-0.5 italic text-slate-500">{reportOutcome.outcomeReasoning}</p>
-                    )}
-                  </>
-                )
-              ) : reportOutcome.status === 'confirmed' ? (
-                <p className="text-red-600">Reported — confirmed and flagged</p>
-              ) : (
-                <>
-                  <p>Reported — reviewed, not flagged</p>
-                  {reportOutcome.outcomeReasoning && (
-                    <p className="mt-0.5 italic text-slate-500">{reportOutcome.outcomeReasoning}</p>
-                  )}
-                </>
-              )}
-
-              {/* Escalation (migration 011) -- one shared block for both
-                  claim directions: whenever the LLM dismissed the report
-                  (disagreed with the human), offer a second, human opinion.
-                  Once escalated it's a durable record for reviewers /
-                  retraining, so the button gives way to a confirmation. */}
-              {reportOutcome.status === 'dismissed' &&
-                (reportOutcome.escalatedAt ? (
-                  <p className="mt-1 text-slate-500">Escalated for human review</p>
-                ) : (
-                  <div className="mt-1">
-                    <button
-                      onClick={async () => {
-                        if (escalateState === 'submitting') return
-                        setEscalateState('submitting')
-                        const ok = await onEscalate()
-                        setEscalateState(ok ? 'idle' : 'failed')
-                      }}
-                      disabled={escalateState === 'submitting'}
-                      className="text-slate-500 underline hover:text-slate-700 disabled:opacity-50"
-                    >
-                      {escalateState === 'submitting' ? 'Escalating…' : 'Escalate to human review'}
-                    </button>
-                    {escalateState === 'failed' && (
-                      <p className="mt-0.5 text-red-600">Couldn't escalate. Please try again.</p>
-                    )}
-                  </div>
-                ))}
-            </div>
-          ) : reportOpen ? (
-            <div className="mt-1 space-y-1">
-              <textarea
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder={flagged ? 'Why is this message not harmful?' : 'Why does this seem harmful?'}
-                rows={2}
-                autoFocus
-                className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
-              />
-              <div className="flex gap-2">
-                <button
-                  onClick={async () => {
-                    if (!reason.trim() || submitState === 'submitting') return
-                    setSubmitState('submitting')
-                    // Claim follows the flag state at submit time; only clear
-                    // the typed reason on success -- on failure it stays put
-                    // so the user can retry without retyping.
-                    const ok = await onSubmitReport(reason, flagged ? 'safe' : 'harmful')
-                    if (ok) {
-                      setReason('')
-                      setSubmitState('idle')
-                    } else {
-                      setSubmitState('failed')
-                    }
-                  }}
-                  disabled={!reason.trim() || submitState === 'submitting'}
-                  className={`rounded px-2 py-0.5 text-[11px] font-medium text-white disabled:opacity-50 ${
-                    flagged ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'
-                  }`}
-                >
-                  {submitState === 'submitting' ? 'Submitting…' : 'Submit'}
-                </button>
-                <button
-                  onClick={onToggleReport}
-                  className="rounded border border-slate-300 px-2 py-0.5 text-[11px] text-slate-600 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-              </div>
-              {submitState === 'failed' && (
-                <p className="text-[11px] text-red-600">
-                  Couldn't submit. Please try again.
-                </p>
-              )}
-            </div>
-          ) : (
-            <button
-              onClick={onToggleReport}
-              className="mt-0.5 text-[11px] text-slate-400 underline hover:text-slate-600"
-            >
-              {flagged ? 'Not harmful?' : 'Report'}
-            </button>
-          ))}
       </div>
     </div>
   )
@@ -228,11 +126,17 @@ export default function ChatPane({ conversationId, friend }: ChatPaneProps) {
     loading: scoresLoading,
     error: scoresError,
   } = useScores(conversationId)
-  const { reports, report, escalate } = useMessageReport(conversationId)
   const [draft, setDraft] = useState('')
   const [alertsOpen, setAlertsOpen] = useState(false)
-  // Which message's inline report form is open -- only one at a time.
-  const [reportingId, setReportingId] = useState<string | null>(null)
+  // Conversation-level report -- UI only until a backend contract exists (see
+  // ReportConversationDialog). Resets per conversation via ChatPage's
+  // key={conversationId} remount.
+  const [reportOpen, setReportOpen] = useState(false)
+  const [conversationReported, setConversationReported] = useState(false)
+  // Feedback ("NUWA got this wrong") is tracked separately from a report --
+  // they mean different things and can both happen on one conversation.
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const [feedbackSent, setFeedbackSent] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   // Deep-link target from /reports (?msg=<id>). Handled once per mount; the
   // key={conversationId} remount in ChatPage resets it per conversation.
@@ -291,11 +195,11 @@ export default function ChatPane({ conversationId, friend }: ChatPaneProps) {
   return (
     <div className="flex h-full min-h-0">
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 py-2.5">
+        <div className="flex shrink-0 items-center gap-3 border-b border-slate-200/70 bg-panel/95 px-5 py-3 backdrop-blur">
           <Link
             to="/chat"
             aria-label="Back to chats"
-            className="-ml-1 rounded-md p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 md:hidden"
+            className="-ml-1 rounded-lg p-1 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 md:hidden"
           >
             <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5" aria-hidden="true">
               <path
@@ -306,23 +210,116 @@ export default function ChatPane({ conversationId, friend }: ChatPaneProps) {
             </svg>
           </Link>
           <Avatar size="sm" name={friend?.display_name ?? friend?.username} color={friend?.avatar_color} />
-          <p className="min-w-0 truncate text-sm font-medium text-slate-900">
-            {friend?.display_name ?? friend?.username ?? '…'}
-          </p>
+          <div className="min-w-0">
+            <p className="min-w-0 truncate text-sm font-semibold tracking-tight text-slate-900">
+              {friend?.display_name ?? friend?.username ?? '…'}
+            </p>
+            {friend?.username && (
+              <p className="truncate text-xs text-slate-400">@{friend.username}</p>
+            )}
+          </div>
+
+          {/* Report this conversation. Secondary styling on purpose -- it must
+              be reachable but must not compete with the conversation itself.
+              UI only for now (see ReportConversationDialog): the reported flag
+              is local component state, not persisted. */}
+          <div className="ml-auto shrink-0">
+            {conversationReported ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-100 px-3.5 py-1.5 text-[13px] font-semibold text-slate-500">
+                <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5" aria-hidden="true">
+                  <path
+                    fillRule="evenodd"
+                    d="M16.7 5.3a1 1 0 0 1 0 1.4l-7.5 7.5a1 1 0 0 1-1.4 0l-3.5-3.5a1 1 0 1 1 1.4-1.4l2.8 2.79 6.8-6.79a1 1 0 0 1 1.4 0Z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                Reported
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setReportOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-full border border-field-border bg-field px-3.5 py-1.5 text-[13px] font-semibold text-brand-600 transition-colors outline-none hover:border-brand-200 hover:bg-brand-50 focus-visible:ring-2 focus-visible:ring-outgoing-border"
+              >
+                <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5" aria-hidden="true">
+                  <path d="M4 2.75a.75.75 0 0 1 .75.75v.4l1.4-.35a5.5 5.5 0 0 1 3.6.3 4 4 0 0 0 2.94.13l1.62-.58a.75.75 0 0 1 1 .7v6.9a.75.75 0 0 1-.5.71l-1.86.66a5.5 5.5 0 0 1-4.04-.18 4 4 0 0 0-2.62-.22l-1.54.39v4.89a.75.75 0 0 1-1.5 0V3.5A.75.75 0 0 1 4 2.75Z" />
+                </svg>
+                Report
+              </button>
+            )}
+          </div>
         </div>
 
+        {conversationReported && (
+          // Confirmation after a report is sent. Neutral, not red -- nothing
+          // has gone wrong; the user has been heard and review is pending.
+          <div className="shrink-0 bg-chat px-5 pt-4">
+            <p className="flex items-start gap-2.5 rounded-xl border border-field-border bg-field px-3.5 py-2.5 text-[13px] leading-snug text-slate-700 shadow-card">
+              <span aria-hidden className="mt-0.5 text-slate-400">
+                <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
+                  <path
+                    fillRule="evenodd"
+                    d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.7-9.3a1 1 0 0 0-1.4-1.4L9 10.58 7.7 9.3a1 1 0 0 0-1.4 1.4l2 2a1 1 0 0 0 1.4 0l4-4Z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </span>
+              <span>
+                <span className="font-semibold text-slate-900">Report sent.</span> Thanks for
+                helping keep NUWA safer.
+              </span>
+            </p>
+          </div>
+        )}
+
         {conversationScores.length > 0 && (
-          <div className="shrink-0 border-b border-red-200 bg-red-50 px-4 py-2">
+          // Inline safety notice sitting ON the chat canvas below the header,
+          // not a full-bleed strip pinned under it -- it reads as a card in the
+          // conversation rather than something covering it.
+          <div className="shrink-0 space-y-2 bg-chat px-5 pt-4">
             {conversationScores.map((s) => (
-              <p key={s.id} className="text-sm text-red-800">
-                ⚠ <span className="font-medium capitalize">{s.label}</span> risk detected
-                {s.confidence != null && <> — confidence {Math.round(s.confidence * 100)}%</>}
-              </p>
+              <div
+                key={s.id}
+                className="flex items-start gap-2.5 rounded-xl border border-harm-border/50 bg-harm-bg px-3.5 py-2.5 shadow-card"
+              >
+                <span
+                  aria-hidden
+                  className="mt-1 h-2 w-2 shrink-0 rounded-full bg-harm-border ring-2 ring-harm-chip"
+                />
+                <div className="min-w-0">
+                  <p className="text-[13px] leading-snug text-slate-700">
+                    <span className="font-semibold capitalize text-slate-900">{s.label}</span> risk
+                    detected
+                    {s.confidence != null && (
+                      <span className="text-slate-500">
+                        {' '}
+                        — confidence {Math.round(s.confidence * 100)}%
+                      </span>
+                    )}
+                  </p>
+                  {/* Model-correction affordance, deliberately quiet and scoped
+                      to the alert itself: it only makes sense when NUWA has
+                      actually flagged something. Never a top-level action. */}
+                  {feedbackSent ? (
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      Feedback sent. NUWA will use this to improve future detection.
+                    </p>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setFeedbackOpen(true)}
+                      className="mt-1 text-[11px] font-medium text-slate-500 underline decoration-slate-300 underline-offset-2 transition-colors outline-none hover:text-slate-800 focus-visible:text-slate-800"
+                    >
+                      Wrong detection? Give feedback
+                    </button>
+                  )}
+                </div>
+              </div>
             ))}
           </div>
         )}
 
-        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 py-3">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-chat px-5 py-4">
           {loading ? (
             <p className="text-sm text-slate-500">Loading…</p>
           ) : error ? (
@@ -339,15 +336,6 @@ export default function ChatPane({ conversationId, friend }: ChatPaneProps) {
                 scores={messageScores.get(m.id)}
                 isEvidence={evidenceIds.has(m.id)}
                 isTarget={m.id === flashId}
-                reportOutcome={reports.get(m.id)}
-                reportOpen={reportingId === m.id}
-                onToggleReport={() => setReportingId((id) => (id === m.id ? null : m.id))}
-                onSubmitReport={async (reason, claim) => {
-                  const ok = await report(m.id, reason, claim)
-                  if (ok) setReportingId(null)
-                  return ok
-                }}
-                onEscalate={() => escalate(m.id)}
               />
             ))
           )}
@@ -359,10 +347,10 @@ export default function ChatPane({ conversationId, friend }: ChatPaneProps) {
           <button
             onClick={() => setAlertsOpen((o) => !o)}
             aria-expanded={alertsOpen}
-            className={`flex w-full items-center justify-between border-t px-4 py-2 text-sm font-medium ${
+            className={`flex w-full items-center justify-between border-t px-4 py-2.5 text-[13px] font-medium ${
               alertCount > 0
-                ? 'border-amber-200 bg-amber-50 text-amber-800'
-                : 'border-slate-200 bg-white text-slate-600'
+                ? 'border-slate-200/70 bg-amber-50/60 text-slate-700'
+                : 'border-slate-200/70 bg-panel text-slate-600'
             }`}
           >
             <span>
@@ -372,7 +360,7 @@ export default function ChatPane({ conversationId, friend }: ChatPaneProps) {
             <span aria-hidden>{alertsOpen ? '▾' : '▴'}</span>
           </button>
           {alertsOpen && (
-            <div className="max-h-[45dvh] overflow-y-auto border-t border-slate-200 bg-white">
+            <div className="max-h-[45dvh] overflow-y-auto border-t border-slate-200 bg-safety">
               <AlertPanel
                 conversationScores={conversationScores}
                 messageScores={messageScores}
@@ -384,26 +372,49 @@ export default function ChatPane({ conversationId, friend }: ChatPaneProps) {
           )}
         </div>
 
-        <form onSubmit={handleSend} className="flex shrink-0 gap-2 border-t border-slate-200 bg-white px-4 py-3">
+        <form
+          onSubmit={handleSend}
+          className="flex shrink-0 items-center gap-2 border-t border-slate-200/70 bg-panel px-4 py-3"
+        >
           <input
             type="text"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder="Type a message"
             aria-label="Message"
-            className="w-full min-w-0 rounded-md border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+            className="w-full min-w-0 rounded-full border border-slate-200 bg-slate-50 px-4 py-2.5 text-slate-900 transition-colors outline-none placeholder:text-slate-400 focus:border-field-focus focus:bg-ivory focus:shadow-field"
           />
           <button
             type="submit"
             disabled={!draft.trim()}
-            className="shrink-0 rounded-md bg-emerald-600 px-4 py-2 font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+            className="shrink-0 rounded-full bg-gradient-to-br from-brand-600 to-brand-700 px-5 py-2.5 font-semibold text-white shadow-brand transition-all hover:brightness-110 disabled:opacity-40 disabled:shadow-none"
           >
             Send
           </button>
         </form>
       </div>
 
-      <aside className="hidden w-72 shrink-0 flex-col overflow-y-auto border-l border-slate-200 bg-white md:flex">
+      <ReportConversationDialog
+        open={reportOpen}
+        onClose={() => setReportOpen(false)}
+        onSubmit={() => {
+          // No network call yet -- see ReportConversationDialog's docstring.
+          setReportOpen(false)
+          setConversationReported(true)
+        }}
+      />
+
+      <FeedbackDialog
+        open={feedbackOpen}
+        onClose={() => setFeedbackOpen(false)}
+        onSubmit={() => {
+          // No network call yet -- see FeedbackDialog's docstring.
+          setFeedbackOpen(false)
+          setFeedbackSent(true)
+        }}
+      />
+
+      <aside className="hidden w-72 shrink-0 flex-col overflow-y-auto border-l border-slate-200/70 bg-safety md:flex lg:w-80">
         <AlertPanel
           conversationScores={conversationScores}
           messageScores={messageScores}
