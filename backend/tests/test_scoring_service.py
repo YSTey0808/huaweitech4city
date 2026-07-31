@@ -38,6 +38,36 @@ def test_fetch_message_window_anchor_from_other_conversation_returns_empty(fake_
     assert fetch_message_window(fake_supabase, "c1", up_to_message_id="c2-1") == []
 
 
+def test_fetch_message_window_carries_reply_to(fake_supabase):
+    # The column is selected and mapped, but was null in every production row
+    # until the chat UI started writing it -- which left the GNN's reply_to
+    # edge relation permanently empty. Pin that it survives the fetch.
+    messages = make_messages(5)
+    messages[4]["reply_to"] = "c1-2"
+    fake_supabase.store["messages"] = messages
+
+    out = fetch_message_window(fake_supabase, "c1")
+
+    assert out[4]["reply_to_message_id"] == "c1-2"
+    # Everything else stays None rather than inheriting the neighbour's parent.
+    assert [m["reply_to_message_id"] for m in out[:4]] == [None] * 4
+
+
+def test_fetch_message_window_drops_reply_parent_outside_window(fake_supabase):
+    # Not asserting a bug -- documenting the boundary. WINDOW_SIZE is 10, so a
+    # reply whose parent is older than the window still carries its parent id
+    # here; build_message_graph is what drops the edge, because the parent is
+    # not among the returned nodes. See the GNN handover notes.
+    messages = make_messages(15)
+    messages[14]["reply_to"] = "c1-0"  # older than the last-10 window
+    fake_supabase.store["messages"] = messages
+
+    out = fetch_message_window(fake_supabase, "c1")
+
+    assert out[-1]["reply_to_message_id"] == "c1-0"
+    assert "c1-0" not in {m["message_id"] for m in out}
+
+
 # ---- write_scores ----
 
 def _harmful_result(msg_id="m1", confidence=0.9, severity="high", reasoning="alert"):
